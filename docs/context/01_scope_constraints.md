@@ -6,7 +6,7 @@ Build an **on-demand visual connection finder** for **public figures** that retu
 
 The system operates as:
 
-* **Retrieval (Google PSE)** → **Verification (Rekognition)** → **Co-presence Check (Gemini Flash)** → **LLM planning** → **Explainable output**
+* **Retrieval (Google PSE)** → **Co-presence Check (Gemini Flash)** → **Verification (Rekognition)** → **LLM planning** → **Explainable output**
 * No precomputed global relationship graph.
 
 ---

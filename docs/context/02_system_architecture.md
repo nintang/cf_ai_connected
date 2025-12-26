@@ -146,7 +146,9 @@ The Worker is a **state machine** (not an LLM app). It controls hop budget, retr
 1. User enters query (Person A, Person B) in the Next.js chat UI.
 2. UI calls the Worker API endpoint (session-based) requesting a connection.
 3. Worker attempts direct retrieval: Google PSE `"A B"` → first 5 images.
-4. Worker verifies each image via Rekognition:
+4. Worker verifies each image:
+   - **First:** Check visual co-presence with **Gemini Flash**. Reject collages/grids.
+   - **Second:** Verify identities via **Rekognition**.
    - If a direct edge is verified, produce final result.
    - Otherwise, Worker gathers candidate intermediates from Rekognition detections and uses the LLM to select next expansions.
 5. Worker repeats bounded expansion up to 6 hops.
@@ -171,11 +173,11 @@ flowchart TD
   W -->|Fetch image bytes (top 5)| IMG[Image Fetch]
   IMG --> W
 
-  W -->|"RecognizeCelebrities(image)"| REK["AWS Rekognition<br/>Celebrity Recognition"]
-  REK -->|Celebrities + confidence| W
-
   W -->|"Verify Co-presence (Image)"| VLM["Gemini Flash<br/>Visual Filter"]
   VLM -->|"Pass/Fail (Real scene vs Collage)"| W
+
+  W -->|"RecognizeCelebrities(image)"| REK["AWS Rekognition<br/>Celebrity Recognition"]
+  REK -->|Celebrities + confidence| W
 
   W -->|Planning/narration only| LLM["LLM Planner<br/>Gemini now → Llama 3.3 (Workers AI)"]
   LLM -->|Next candidates + query templates| W

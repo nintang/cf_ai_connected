@@ -9,3 +9,10 @@ export {
 } from "./rekognition/client.js";
 export type { RekognitionConfig } from "./rekognition/client.js";
 
+// Gemini Visual Filter
+export {
+  GeminiVisualFilterClient,
+  createGeminiClient,
+} from "./gemini/client.js";
+export type { GeminiConfig, VisualVerificationResult } from "./gemini/client.js";
+

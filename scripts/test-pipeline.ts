@@ -10,6 +10,7 @@
  * Environment variables required:
  *   GOOGLE_API_KEY - Google API key with Custom Search enabled
  *   GOOGLE_CX - Programmable Search Engine ID
+ *   GEMINI_API_KEY - Google Gemini API key for visual verification
  *   AWS_ACCESS_KEY_ID - AWS access key
  *   AWS_SECRET_ACCESS_KEY - AWS secret key
  *   AWS_REGION - AWS region (default: us-east-1)
@@ -19,6 +20,7 @@ import "dotenv/config";
 
 import { createGooglePSEClient } from "../packages/integrations/src/google-pse/client.js";
 import { createRekognitionClient } from "../packages/integrations/src/rekognition/client.js";
+import { createGeminiClient } from "../packages/integrations/src/gemini/client.js";
 import {
   directQuery,
   isValidEvidence,
@@ -39,10 +41,12 @@ interface TestResult {
   personB: string;
   query: string;
   imagesSearched: number;
+  imagesPassedVisualCheck: number;
   imagesAnalyzed: number;
   verifiedEdge: VerifiedEdge | null;
   allAnalyses: Array<{
     imageUrl: string;
+    visualCheck: { passed: boolean; reason: string } | null;
     celebrities: Array<{ name: string; confidence: number }>;
     isValidForEdge: boolean;
   }>;
@@ -59,6 +63,7 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
   // Initialize clients
   console.log("📡 Initializing clients...");
   const pseClient = createGooglePSEClient();
+  const geminiClient = createGeminiClient();
   const rekognitionClient = createRekognitionClient();
 
   // Step 1: Search for images
@@ -75,23 +80,45 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
       personB,
       query,
       imagesSearched: 0,
+      imagesPassedVisualCheck: 0,
       imagesAnalyzed: 0,
       verifiedEdge: null,
       allAnalyses: [],
     };
   }
 
-  // Step 2: Analyze each image with Rekognition
-  console.log("\n🤖 Analyzing images with Rekognition...");
+  // Step 2: Visual verification with Gemini Flash (filter collages/photogrids)
+  console.log("\n🔬 Verifying visual co-presence with Gemini Flash...");
 
   const evidenceRecords: EvidenceRecord[] = [];
   const allAnalyses: TestResult["allAnalyses"] = [];
+  let imagesPassedVisualCheck = 0;
 
   for (let i = 0; i < searchResponse.results.length; i++) {
     const imageResult = searchResponse.results[i];
     console.log(`\n   [${i + 1}/${searchResponse.results.length}] ${imageResult.imageUrl.substring(0, 60)}...`);
 
     try {
+      // Step 2a: Gemini Flash visual verification
+      console.log(`       🔬 Checking if real scene (not collage)...`);
+      const visualCheck = await geminiClient.verifyVisualCopresence(imageResult.imageUrl);
+
+      if (!visualCheck.isValidScene) {
+        console.log(`       ❌ REJECTED: ${visualCheck.reason}`);
+        allAnalyses.push({
+          imageUrl: imageResult.imageUrl,
+          visualCheck: { passed: false, reason: visualCheck.reason },
+          celebrities: [],
+          isValidForEdge: false,
+        });
+        continue; // Skip Rekognition for collages - saves cost!
+      }
+
+      console.log(`       ✅ Valid scene: ${visualCheck.reason}`);
+      imagesPassedVisualCheck++;
+
+      // Step 2b: Rekognition celebrity detection (only for valid scenes)
+      console.log(`       🤖 Detecting celebrities with Rekognition...`);
       const analysis = await rekognitionClient.detectCelebrities(imageResult.imageUrl);
 
       const celebrities = analysis.celebrities.map((c) => ({
@@ -110,6 +137,7 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
 
       allAnalyses.push({
         imageUrl: imageResult.imageUrl,
+        visualCheck: { passed: true, reason: visualCheck.reason },
         celebrities,
         isValidForEdge: isValid,
       });
@@ -134,6 +162,7 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
       console.log(`       ❌ Error: ${error instanceof Error ? error.message : "Unknown error"}`);
       allAnalyses.push({
         imageUrl: imageResult.imageUrl,
+        visualCheck: null,
         celebrities: [],
         isValidForEdge: false,
       });
@@ -143,6 +172,9 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
   // Step 3: Create verified edge if we have evidence
   console.log("\n📊 Results Summary");
   console.log("==================");
+  console.log(`   Images searched: ${searchResponse.results.length}`);
+  console.log(`   Passed visual check (real scenes): ${imagesPassedVisualCheck}`);
+  console.log(`   Rejected (collages/grids): ${searchResponse.results.length - imagesPassedVisualCheck}`);
 
   const verifiedEdge = createVerifiedEdge(personA, personB, evidenceRecords);
 
@@ -166,7 +198,8 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
     personB,
     query,
     imagesSearched: searchResponse.results.length,
-    imagesAnalyzed: allAnalyses.length,
+    imagesPassedVisualCheck,
+    imagesAnalyzed: imagesPassedVisualCheck, // Only images that passed visual check were analyzed
     verifiedEdge,
     allAnalyses,
   };

@@ -45,6 +45,7 @@ import type {
 } from "../packages/contracts/src/index.js";
 
 const CONFIDENCE_THRESHOLD = 80;
+const MIN_EVIDENCE_COUNT = 1; // Stop after finding this many valid evidence images
 
 interface ImageAnalysis {
   imageUrl: string;
@@ -95,7 +96,8 @@ function printHeader(personA: string, personB: string) {
   configTable.push(
     [styles.dim("Person A"), styles.highlight(personA)],
     [styles.dim("Person B"), styles.highlight(personB)],
-    [styles.dim("Threshold"), styles.accent(`${CONFIDENCE_THRESHOLD}%`)]
+    [styles.dim("Threshold"), styles.accent(`${CONFIDENCE_THRESHOLD}%`)],
+    [styles.dim("Early stop"), styles.accent(`after ${MIN_EVIDENCE_COUNT} evidence`)]
   );
 
   console.log(configTable.toString());
@@ -229,6 +231,19 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
         if (evidence) {
           evidenceRecords.push(evidence);
         }
+
+        // Early stopping: we have enough evidence
+        if (evidenceRecords.length >= MIN_EVIDENCE_COUNT) {
+          allAnalyses.push({
+            imageUrl: imageResult.imageUrl,
+            visualCheck: { passed: true, reason: visualCheck.reason },
+            celebrities,
+            isValidForEdge: isValid,
+          });
+          console.log();
+          console.log(`  ${styles.success("✓")} ${styles.dim(`Found ${evidenceRecords.length} evidence - stopping early`)}`);
+          break;
+        }
       } else {
         const celebStr = celebrities.length > 0
           ? celebrities.map((c) => `${c.name} ${styles.dim(`${c.confidence}%`)}`).join(", ")
@@ -269,9 +284,12 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
     colWidths: [30, 15],
   });
 
-  const rejected = searchResponse.results.length - imagesPassedVisualCheck;
+  const imagesProcessed = allAnalyses.length;
+  const rejected = imagesProcessed - imagesPassedVisualCheck;
+  const stoppedEarly = evidenceRecords.length >= MIN_EVIDENCE_COUNT && imagesProcessed < searchResponse.results.length;
   statsTable.push(
-    [styles.dim("Images searched"), styles.highlight(searchResponse.results.length.toString())],
+    [styles.dim("Images available"), styles.highlight(searchResponse.results.length.toString())],
+    [styles.dim("Images processed"), stoppedEarly ? styles.success(`${imagesProcessed} (early stop)`) : styles.highlight(imagesProcessed.toString())],
     [styles.dim("Passed visual check"), styles.success(imagesPassedVisualCheck.toString())],
     [styles.dim("Rejected (collages)"), rejected > 0 ? styles.warning(rejected.toString()) : styles.dim("0")],
     [styles.dim("Valid evidence found"), evidenceRecords.length > 0 ? styles.success(evidenceRecords.length.toString()) : styles.error("0")]

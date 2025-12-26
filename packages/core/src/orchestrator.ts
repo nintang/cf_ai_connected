@@ -97,6 +97,14 @@ export interface StrategicRanking {
   hypothesis: string;
 }
 
+export interface BridgeCandidateSuggestion {
+  name: string;
+  reasoning: string;
+  connectionToA: string;
+  connectionToB: string;
+  confidence: number;
+}
+
 // ============================================================================
 // Client Interfaces (Dependency Injection)
 // ============================================================================
@@ -125,6 +133,11 @@ export interface PlannerClient {
 export interface IntelligentPlannerClient extends PlannerClient {
   /** Research potential connection paths between two people */
   researchConnection(personA: string, personB: string): Promise<ConnectionResearch>;
+  /** 
+   * Suggest specific real bridge candidates based on LLM's world knowledge
+   * Returns actual people names who might connect personA and personB
+   */
+  suggestBridgeCandidates(personA: string, personB: string): Promise<BridgeCandidateSuggestion[]>;
   /** Strategically rank candidates based on likelihood to reach target */
   rankCandidatesStrategically(
     frontier: string,
@@ -162,6 +175,7 @@ export class InvestigationOrchestrator {
   private readonly clients: OrchestratorClients;
   private readonly onEvent?: EventCallback;
   private research: ConnectionResearch | null = null;
+  private suggestedBridges: BridgeCandidateSuggestion[] = [];
 
   constructor(
     clients: OrchestratorClients,
@@ -185,6 +199,7 @@ export class InvestigationOrchestrator {
   ): planner is IntelligentPlannerClient {
     return (
       "researchConnection" in planner &&
+      "suggestBridgeCandidates" in planner &&
       "rankCandidatesStrategically" in planner &&
       "generateSmartQueries" in planner &&
       "generateFrontierQueries" in planner
@@ -331,6 +346,7 @@ export class InvestigationOrchestrator {
     this.emit("research", `Researching potential connections between ${personA} and ${personB}...`);
 
     try {
+      // Get general research about the connection
       this.research = await this.clients.planner.researchConnection(personA, personB);
 
       this.emit("thinking", `Research complete`, { research: this.research });
@@ -354,6 +370,17 @@ export class InvestigationOrchestrator {
 
       if (this.research.reasoning) {
         this.emit("thinking", `💭 ${this.research.reasoning}`);
+      }
+
+      // Get specific bridge candidate suggestions from LLM's world knowledge
+      this.emit("research", `🎯 Finding specific bridge candidates...`);
+      this.suggestedBridges = await this.clients.planner.suggestBridgeCandidates(personA, personB);
+
+      if (this.suggestedBridges.length > 0) {
+        this.emit("research", `💡 Suggested bridge candidates (from LLM knowledge):`);
+        for (const bridge of this.suggestedBridges.slice(0, 5)) {
+          this.emit("thinking", `  • ${bridge.name} (${bridge.confidence}%): ${bridge.reasoning}`);
+        }
       }
 
     } catch (error) {
@@ -400,34 +427,76 @@ export class InvestigationOrchestrator {
       `Discovering candidates from ${state.frontier}...`
     );
 
-    // Generate queries - use intelligent planner when available
-    let queries: string[];
+    // Build queries prioritizing suggested bridge candidates
+    let queries: string[] = [];
+    
+    // PRIORITY 1: Search for frontier with each suggested bridge candidate
+    // These are high-value targets from LLM's world knowledge
+    // Filter out bridges that match the current frontier or are already in path
+    if (this.suggestedBridges.length > 0) {
+      const frontierLower = state.frontier.toLowerCase();
+      const pathLower = new Set(state.path.map(p => p.toLowerCase()));
+      
+      const validBridges = this.suggestedBridges.filter(b => {
+        const nameLower = b.name.toLowerCase();
+        return !nameLower.includes(frontierLower) && 
+               !frontierLower.includes(nameLower) &&
+               !pathLower.has(nameLower);
+      });
+      
+      const bridgeQueries = validBridges
+        .slice(0, 5)
+        .map(b => `${state.frontier} ${b.name}`);
+      queries.push(...bridgeQueries);
+      
+      if (bridgeQueries.length > 0) {
+        this.emit("thinking", `Generated ${bridgeQueries.length} queries from suggested bridges`);
+        for (const b of validBridges.slice(0, 3)) {
+          this.emit("thinking", `  → "${state.frontier} ${b.name}" (${b.reasoning})`);
+        }
+      }
+    }
+
+    // PRIORITY 2: Use smart queries from LLM if available
     if (this.isIntelligentPlanner(this.clients.planner)) {
       try {
         if (this.research) {
           // Use research-informed queries when we have research
-          queries = await this.clients.planner.generateSmartQueries(
+          const smartQueries = await this.clients.planner.generateSmartQueries(
             state.frontier,
             state.personB,
             this.research
           );
-          this.emit("thinking", `Generated ${queries.length} research-based queries`);
-        } else {
-          // Generate contextual queries based on who the frontier person is
+          // Add smart queries that aren't duplicates
+          const existingSet = new Set(queries.map(q => q.toLowerCase()));
+          for (const q of smartQueries) {
+            if (!existingSet.has(q.toLowerCase())) {
+              queries.push(q);
+            }
+          }
+          this.emit("thinking", `Added ${smartQueries.length} research-based queries`);
+        } else if (queries.length === 0) {
+          // Fallback: Generate contextual queries based on who the frontier person is
           queries = await this.clients.planner.generateFrontierQueries(state.frontier);
           this.emit("thinking", `Generated ${queries.length} contextual queries for ${state.frontier}`);
         }
-        for (const q of queries.slice(0, 4)) {
-          this.emit("thinking", `  → "${q}"`);
-        }
       } catch {
+        if (queries.length === 0) {
         queries = discoveryQueries(state.frontier);
       }
-    } else {
+      }
+    } else if (queries.length === 0) {
       queries = discoveryQueries(state.frontier);
     }
 
+    // Log final queries
+    this.emit("thinking", `Total queries: ${queries.length}`);
+    for (const q of queries.slice(0, 4)) {
+      this.emit("thinking", `  → "${q}"`);
+    }
+
     const allAnalyses: AnalysisWithContext[] = [];
+    let foundHighConfidenceCandidates = false;
 
     for (const query of queries) {
       if (this.isBudgetExhausted(state.budgets)) break;
@@ -435,6 +504,22 @@ export class InvestigationOrchestrator {
       this.emit("status", `Searching: "${query}"`);
       const analyses = await this.searchAndAnalyze(state, query, state.frontier);
       allAnalyses.push(...analyses);
+
+      // Check if we found strong candidates
+      const currentCandidates = aggregateCandidates(
+        allAnalyses,
+        state.frontier,
+        state.path,
+        this.config.confidenceThreshold
+      );
+
+      // Heuristic: If we found at least 2 candidates with >90% confidence, stop searching
+      const highConfCandidates = currentCandidates.filter(c => c.bestCoappearConfidence >= 90);
+      if (highConfCandidates.length >= 2) {
+        this.emit("thinking", `Found ${highConfCandidates.length} high-confidence candidates (${highConfCandidates.map(c => c.name).join(", ")}). Stopping search early.`);
+        foundHighConfidenceCandidates = true;
+        break;
+      }
     }
 
     // Aggregate candidates, excluding people already in the path

@@ -54,6 +54,22 @@ export interface StrategicRanking {
 }
 
 /**
+ * A suggested bridge candidate from LLM's world knowledge
+ */
+export interface BridgeCandidateSuggestion {
+  /** Full name of the suggested bridge person */
+  name: string;
+  /** Why this person might bridge the two targets */
+  reasoning: string;
+  /** How they're connected to Person A */
+  connectionToA: string;
+  /** How they're connected to Person B */
+  connectionToB: string;
+  /** Confidence in this suggestion (0-100) */
+  confidence: number;
+}
+
+/**
  * Configuration for Gemini client
  */
 export interface GeminiConfig {
@@ -527,6 +543,43 @@ DO NOT say things like:
   // Research & Strategic Intelligence
   // ==========================================================================
 
+  private static readonly BRIDGE_CANDIDATES_PROMPT = `You are an expert on celebrity connections and public figure appearances.
+
+TASK: Suggest SPECIFIC REAL PEOPLE who might bridge Person A and Person B.
+
+Think about:
+1. Who has Person A been PUBLICLY PHOTOGRAPHED with?
+2. Who has Person B been PUBLICLY PHOTOGRAPHED with?
+3. Which people appear in BOTH circles?
+
+Focus on:
+- Known public appearances, events, collaborations
+- Talk show appearances (hosts interview many people)
+- Award shows, galas, political events
+- Music collaborations, film premieres, sports events
+- Business meetings, charity events
+
+IMPORTANT:
+- Suggest REAL SPECIFIC NAMES, not categories
+- These should be people likely to have been photographed with BOTH A and B
+- Prioritize high-profile people (more likely to have photos)
+- Include your reasoning for each suggestion
+
+Output ONLY valid JSON:
+{
+  "bridgeCandidates": [
+    {
+      "name": "Full Name",
+      "reasoning": "Why this person might connect A and B",
+      "connectionToA": "How they're connected to Person A",
+      "connectionToB": "How they're connected to Person B",
+      "confidence": 0-100
+    }
+  ],
+  "summary": "Brief explanation of the connection strategy",
+  "searchQueries": ["specific search queries to find photos"]
+}`;
+
   private static readonly RESEARCH_PROMPT = `You are a research assistant helping find visual connections between public figures.
 
 Your task: Research how Person A might be connected to Person B through shared events, industries, or mutual contacts.
@@ -595,6 +648,59 @@ Output ONLY valid JSON with this structure:
         confidence: 30,
         reasoning: "Using default research due to LLM failure",
       };
+    }
+  }
+
+  /**
+   * Suggest specific real bridge candidates who might connect two people
+   * Uses LLM's knowledge of real-world connections and public appearances
+   */
+  async suggestBridgeCandidates(
+    personA: string,
+    personB: string
+  ): Promise<BridgeCandidateSuggestion[]> {
+    const requestOptions = this.gatewayUrl ? { baseUrl: this.gatewayUrl } : undefined;
+    const model = this.genAI.getGenerativeModel({ model: this.modelName }, requestOptions);
+
+    try {
+      const result = await model.generateContent([
+        GeminiPlannerClient.BRIDGE_CANDIDATES_PROMPT,
+        `Find bridge candidates between:\nPerson A: ${personA}\nPerson B: ${personB}\n\nSuggest specific real people who might have been photographed with BOTH of them.`,
+      ]);
+
+      const responseText = result.response.text();
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      
+      if (!jsonMatch) {
+        throw new Error("No JSON found");
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      if (!Array.isArray(parsed.bridgeCandidates)) {
+        throw new Error("No bridgeCandidates array");
+      }
+
+      return parsed.bridgeCandidates.map((bc: {
+        name?: string;
+        reasoning?: string;
+        connectionToA?: string;
+        connectionToB?: string;
+        confidence?: number;
+      }) => ({
+        name: String(bc.name ?? "Unknown"),
+        reasoning: String(bc.reasoning ?? ""),
+        connectionToA: String(bc.connectionToA ?? ""),
+        connectionToB: String(bc.connectionToB ?? ""),
+        confidence: typeof bc.confidence === "number" ? bc.confidence : 50,
+      })).slice(0, 10);
+
+    } catch (error) {
+      console.warn(
+        "[GeminiPlanner] Bridge candidate suggestion failed:",
+        error instanceof Error ? error.message : error
+      );
+      return [];
     }
   }
 
@@ -730,35 +836,111 @@ Output ONLY valid JSON:
     }
   }
 
+  private static readonly SMART_QUERIES_PROMPT = `You are a search query expert for finding visual connections between public figures.
+
+TASK: Generate search queries to find photos of FRONTIER photographed with people who might also know TARGET.
+
+KEY INSIGHT: We need to find BRIDGE PEOPLE - celebrities who are likely photographed with BOTH the frontier AND the target. Think about:
+1. What is TARGET's profession/industry? (e.g., rapper, actor, politician)
+2. Who from FRONTIER's world might also appear with someone in TARGET's world?
+3. What specific people or contexts bridge these two worlds?
+
+GOOD QUERIES find bridge candidates:
+- If TARGET is a rapper: search for FRONTIER with hip-hop artists, music industry people
+- If TARGET is an athlete: search for FRONTIER with sports figures
+- If TARGET is an actor: search for FRONTIER at film events, with Hollywood people
+
+BAD QUERIES are too generic:
+- "Donald Trump Music" ← too vague
+- "Donald Trump Politics" ← won't help find entertainment connections
+- "Donald Trump event" ← too generic
+
+EXAMPLES:
+- Frontier: Donald Trump, Target: Juice WRLD (rapper)
+  Good: ["Donald Trump Kanye West", "Donald Trump rapper", "Donald Trump hip hop artist", "Donald Trump Lil Wayne"]
+  
+- Frontier: Taylor Swift, Target: LeBron James (athlete)
+  Good: ["Taylor Swift NBA", "Taylor Swift athlete", "Taylor Swift sports event", "Taylor Swift basketball"]
+
+Output ONLY a JSON array of 4-6 specific query strings. No explanation.`;
+
   /**
    * Generate smart search queries based on research and context
+   * Uses LLM to generate queries targeting the TARGET's domain
    */
   async generateSmartQueries(
     frontier: string,
     target: string,
     research: ConnectionResearch
   ): Promise<string[]> {
-    const queries: string[] = [];
+    const requestOptions = this.gatewayUrl ? { baseUrl: this.gatewayUrl } : undefined;
+    const model = this.genAI.getGenerativeModel({ model: this.modelName }, requestOptions);
 
-    // Direct queries
-    queries.push(`${frontier} ${target}`);
-    queries.push(`${frontier} ${target} together`);
+    try {
+      const context = {
+        frontier,
+        target,
+        researchSummary: research.summary,
+        targetIndustries: research.industries,
+        bridgeTypes: research.bridgeTypes,
+      };
 
-    // Industry-based queries
-    for (const industry of research.industries.slice(0, 2)) {
-      queries.push(`${frontier} ${industry}`);
+      const result = await model.generateContent([
+        GeminiPlannerClient.SMART_QUERIES_PROMPT,
+        `Generate bridge-finding queries:\nFRONTIER: ${frontier}\nTARGET: ${target}\nResearch context: ${JSON.stringify(context)}`,
+      ]);
+
+      const responseText = result.response.text();
+      
+      // Extract JSON array from response
+      const arrayMatch = responseText.match(/\[[\s\S]*\]/);
+      if (!arrayMatch) {
+        throw new Error("No JSON array found");
+      }
+
+      const parsed = JSON.parse(arrayMatch[0]);
+      
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("Invalid response format");
+      }
+
+      // Validate all items are strings
+      const queries = parsed
+        .filter((q: unknown) => typeof q === "string" && q.length > 0)
+        .slice(0, 6) as string[];
+
+      // Always include direct query first
+      const allQueries = [
+        `${frontier} ${target}`,
+        `${frontier} ${target} together`,
+        ...queries,
+      ];
+
+      // Deduplicate and limit
+      return [...new Set(allQueries)].slice(0, 8);
+
+    } catch (error) {
+      console.warn(
+        "[GeminiPlanner] Smart query generation failed, using fallback:",
+        error instanceof Error ? error.message : error
+      );
+      
+      // Fallback to basic queries with research info
+      const queries: string[] = [
+        `${frontier} ${target}`,
+        `${frontier} ${target} together`,
+      ];
+
+      // Add bridge-type queries
+      for (const bridgeType of research.bridgeTypes.slice(0, 2)) {
+        queries.push(`${frontier} ${bridgeType}`);
+      }
+
+      // Add research-suggested queries
+      queries.push(...research.suggestedQueries.slice(0, 2));
+
+      return [...new Set(queries)].slice(0, 8);
     }
-
-    // Event-based queries
-    for (const eventType of research.eventTypes.slice(0, 2)) {
-      queries.push(`${frontier} ${eventType}`);
-    }
-
-    // Add research-suggested queries
-    queries.push(...research.suggestedQueries.slice(0, 3));
-
-    // Deduplicate
-    return [...new Set(queries)].slice(0, 8);
   }
 
   private static readonly FRONTIER_QUERIES_PROMPT = `You are a search query generator for finding photos of public figures with other people.

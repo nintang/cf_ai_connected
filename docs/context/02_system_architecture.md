@@ -6,6 +6,7 @@
 
 - **Google Programmable Search (PSE / Custom Search JSON API)** for **image retrieval**
 - **Amazon Rekognition (RecognizeCelebrities)** for **celebrity identity verification**
+- **Gemini Flash** for **visual co-presence verification** (rejecting collages/grids)
 - **LLM (Gemini now; Llama 3.3 via Workers AI later)** for **guided expansion + narration**
 - **Cloudflare Worker** as the **orchestrator/state machine**
 - **Cloudflare KV** as **ephemeral query/session memory (TTL minutes)**
@@ -131,6 +132,15 @@ The Worker is a **state machine** (not an LLM app). It controls hop budget, retr
 
 ---
 
+### Visual Filter (Gemini Flash)
+
+**Responsibilities**
+- Analyze the image to determine if it is a **single, real-world scene** or a **composite** (collage, split-screen, photogrid).
+- Reject images where the people are not physically co-present in the same space.
+- Apply a "deduction" or rejection logic if top results are consistently collages (optional signal for planner).
+
+---
+
 ## Data Flow (Text)
 
 1. User enters query (Person A, Person B) in the Next.js chat UI.
@@ -163,6 +173,9 @@ flowchart TD
 
   W -->|"RecognizeCelebrities(image)"| REK["AWS Rekognition<br/>Celebrity Recognition"]
   REK -->|Celebrities + confidence| W
+
+  W -->|"Verify Co-presence (Image)"| VLM["Gemini Flash<br/>Visual Filter"]
+  VLM -->|"Pass/Fail (Real scene vs Collage)"| W
 
   W -->|Planning/narration only| LLM["LLM Planner<br/>Gemini now → Llama 3.3 (Workers AI)"]
   LLM -->|Next candidates + query templates| W

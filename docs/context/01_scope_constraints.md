@@ -6,7 +6,7 @@ Build an **on-demand visual connection finder** for **public figures** that retu
 
 The system operates as:
 
-* **Retrieval (Google PSE)** → **Verification (Rekognition)** → **LLM planning** → **Explainable output**
+* **Retrieval (Google PSE)** → **Verification (Rekognition)** → **Co-presence Check (Gemini Flash)** → **LLM planning** → **Explainable output**
 * No precomputed global relationship graph.
 
 ---
@@ -62,6 +62,7 @@ The system operates as:
   * ≥1 valid evidence image
   * confidence computed from that evidence
   * source context link
+  * **Visual Co-presence Verified:** The image must pass a check (Gemini Flash) confirming it is a single scene where entities are physically present together, rejecting collages, split-screens, or photogrids.
 
 ### LLM Role Restrictions
 

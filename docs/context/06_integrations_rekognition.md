@@ -5,7 +5,7 @@
 Define the **computer vision verification layer** using **Amazon Rekognition — RecognizeCelebrities**. This layer is the **sole authority** for identifying which public figures appear in an image and at what confidence.
 
 Pipeline position:
-`Google PSE (candidate images) → Rekognition (verify identities) → edge acceptance + confidence math → LLM planning/narration`
+`Google PSE (candidate images) → Rekognition (verify identities) → Gemini Flash (verify co-presence) → edge acceptance + confidence math → LLM planning/narration`
 
 ---
 
@@ -75,6 +75,7 @@ Rekognition returns (conceptually):
 
 * `P` is detected with confidence ≥ 80
 * `Q` is detected with confidence ≥ 80
+* **AND** the image passes the Gemini Flash **visual co-presence check** (confirming it is not a collage/split-screen).
 
 No crowd penalty rules. No group-size weighting.
 

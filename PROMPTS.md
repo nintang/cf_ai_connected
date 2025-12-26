@@ -17,3 +17,6 @@ ideally, it that happens for earlier images in the top 5 we search for, there ca
 update our contex tor the necesaary part of our context for this
 
 6. the gemini flash happens befor e the rekognition
+7. i have miplmented it. nit i wamt you to add the actuall gemini layer
+8. great. cpmmot
+9. structure the terminal output in a btter way. isn't there any library for this, so that i looks like claude terminal or somehting with table?

@@ -65,7 +65,7 @@ export class GooglePSEClient {
       throw new Error(`Google PSE API error (${response.status}): ${errorText}`);
     }
 
-    const data: GoogleSearchResponse = await response.json();
+    const data = (await response.json()) as GoogleSearchResponse;
 
     const results = this.parseResults(data);
 

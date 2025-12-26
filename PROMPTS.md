@@ -20,3 +20,35 @@ update our contex tor the necesaary part of our context for this
 7. i have miplmented it. nit i wamt you to add the actuall gemini layer
 8. great. cpmmot
 9. structure the terminal output in a btter way. isn't there any library for this, so that i looks like claude terminal or somehting with table?
+10. @zsh (195-223) 
+
+
+┌─ Image Analysis Details ──────────────────────────────────────┐
+
+  ┌─────┬────────────┬──────────────────────────────┬─────────────────────────┐
+  │ #   │ Status     │ Celebrities                  │ Reason                  │
+  ├─────┼────────────┼──────────────────────────────┼─────────────────────────┤
+  │ 1   │ No match   │ Barack Obama (100%)          │ The image appears to b  │
+  │     │            │ Donald Trump (100%)          │                         │
+  ├─────┼────────────┼──────────────────────────────┼─────────────────────────┤
+  │ 2   │ No match   │ Barack Obama (100%)          │ This appears to be a s  │
+  │     │            │ Donald Trump (100%)          │                         │
+  ├─────┼────────────┼──────────────────────────────┼─────────────────────────┤
+  │ 3   │ No match   │ Rob Nabors (100%)            │ The image appears to b  │
+  │     │            │ Donald Trump (100%)          │                         │
+  ├─────┼────────────┼──────────────────────────────┼─────────────────────────┤
+  │ 4   │ Error      │ -                            │ Failed to fetch image:  │
+  ├─────┼────────────┼──────────────────────────────┼─────────────────────────┤
+  │ 5   │ No match   │ Barack Obama (100%)          │ The image appears to b  │
+  │     │            │ Donald Trump (100%)          │                         │
+  └─────┴────────────┴──────────────────────────────┴────────────────────
+
+
+  11. plann: let's implment the search for intermediates based on the context in @docs/context/ 
+  let's implment the planner and the search for intermediates based on the context in @docs/context/ 
+  12. how would langchain benefit our application or ai processes?
+  13. does cloud flare have soemthing like langchain or langsmith provides?
+  14. great. let's use langsmith for the things we do here. create a plan for us to impoement it. ilet's apply the onliy needed one. but i need to use the fworlfolows too for our ai, and for the function calling, what at wer'e using and making htem into functions. for example, the verifying agent with rekognition, the google search and other that might be necessary
+  15. @query-templates.ts (1-44) 
+
+it shoudn't be strict as this, i mean ev4nt, award, celebrities, the agent or ai should generat ethe top ones based on the particular frontieer

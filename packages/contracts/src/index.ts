@@ -180,6 +180,129 @@ export const DEFAULT_CONFIG: InvestigationConfig = {
 };
 
 // ============================================================================
+// Budget Types
+// ============================================================================
+
+/**
+ * Budget tracking for API calls during investigation
+ */
+export interface InvestigationBudgets {
+  /** Maximum search API calls allowed */
+  maxSearchCalls: number;
+  /** Maximum Rekognition API calls allowed */
+  maxRekognitionCalls: number;
+  /** Maximum LLM API calls allowed */
+  maxLLMCalls: number;
+  /** Search calls used so far */
+  searchCallsUsed: number;
+  /** Rekognition calls used so far */
+  rekognitionCallsUsed: number;
+  /** LLM calls used so far */
+  llmCallsUsed: number;
+}
+
+export const DEFAULT_BUDGETS: InvestigationBudgets = {
+  maxSearchCalls: 15,
+  maxRekognitionCalls: 75,
+  maxLLMCalls: 10,
+  searchCallsUsed: 0,
+  rekognitionCallsUsed: 0,
+  llmCallsUsed: 0,
+};
+
+// ============================================================================
+// Candidate Types (for LLM Planner)
+// ============================================================================
+
+/**
+ * An intermediate candidate discovered from Rekognition co-appearances
+ */
+export interface Candidate {
+  /** Celebrity name as returned by Rekognition */
+  name: string;
+  /** Number of images where this person co-appears with the frontier */
+  coappearCount: number;
+  /** Highest confidence score for co-appearance with frontier */
+  bestCoappearConfidence: number;
+  /** Context URLs where evidence was found */
+  evidenceContextUrls: string[];
+}
+
+/**
+ * Input to the LLM planner for selecting next expansion
+ */
+export interface PlannerInput {
+  /** Original starting person */
+  personA: string;
+  /** Target person to connect to */
+  personB: string;
+  /** Current frontier node being expanded */
+  frontier: string;
+  /** Hops used so far */
+  hopUsed: number;
+  /** Maximum hops allowed */
+  hopLimit: number;
+  /** Confidence threshold for acceptance */
+  confidenceThreshold: number;
+  /** Remaining budget for API calls */
+  budgets: {
+    searchCallsRemaining: number;
+    rekognitionCallsRemaining: number;
+    llmCallsRemaining: number;
+  };
+  /** Edges verified so far in the path */
+  verifiedEdges: Array<{ from: string; to: string; confidence: number }>;
+  /** Candidates that failed verification */
+  failedCandidates: string[];
+  /** Available candidates to choose from */
+  candidates: Candidate[];
+}
+
+/**
+ * Output from the LLM planner
+ */
+export interface PlannerOutput {
+  /** Ordered list of candidates to try (1-2 items) */
+  nextCandidates: string[];
+  /** Search queries to run next */
+  searchQueries: string[];
+  /** Narration for chat UI */
+  narration: string;
+  /** Whether to stop the search */
+  stop: boolean;
+  /** Reason for the decision */
+  reason: string;
+}
+
+// ============================================================================
+// Investigation State Types
+// ============================================================================
+
+/**
+ * Current state of an investigation
+ */
+export interface InvestigationState {
+  /** Original starting person */
+  personA: string;
+  /** Target person to connect to */
+  personB: string;
+  /** Current frontier node being expanded */
+  frontier: string;
+  /** Current hop depth */
+  hopDepth: number;
+  /** Ordered path of verified nodes so far */
+  path: string[];
+  /** All verified edges */
+  verifiedEdges: VerifiedEdge[];
+  /** Candidates that failed verification */
+  failedCandidates: string[];
+  /** Current budget state */
+  budgets: InvestigationBudgets;
+  /** Investigation status */
+  status: "running" | "success" | "failed";
+}
+
+// ============================================================================
 // Result Types
 // ============================================================================
 

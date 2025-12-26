@@ -16,3 +16,17 @@ export {
 } from "./gemini/client.js";
 export type { GeminiConfig, VisualVerificationResult } from "./gemini/client.js";
 
+// Gemini LLM Planner
+export {
+  GeminiPlannerClient,
+  createGeminiPlannerClient,
+} from "./gemini/client.js";
+export type {
+  ConnectionResearch,
+  RankedCandidate,
+  StrategicRanking,
+} from "./gemini/client.js";
+
+// Workers AI Planner
+export { WorkersAIPlannerClient } from "./workers-ai/client.js";
+

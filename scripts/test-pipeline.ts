@@ -3,9 +3,11 @@
  *
  * Usage:
  *   pnpm test:pipeline "Person A" "Person B"
+ *   pnpm test:pipeline "Person A" "Person B" --multi-hop
  *
  * Example:
  *   pnpm test:pipeline "Donald Trump" "Kanye West"
+ *   pnpm test:pipeline "Donald Trump" "Cardi B" --multi-hop
  *
  * Environment variables required:
  *   GOOGLE_API_KEY - Google API key with Custom Search enabled
@@ -19,22 +21,27 @@
 import "dotenv/config";
 
 import chalk from "chalk";
-// @ts-expect-error cli-table3 uses CommonJS exports
 import Table from "cli-table3";
 import ora from "ora";
 
 import { createGooglePSEClient } from "../packages/integrations/src/google-pse/client.js";
 import { createRekognitionClient } from "../packages/integrations/src/rekognition/client.js";
-import { createGeminiClient } from "../packages/integrations/src/gemini/client.js";
+import {
+  createGeminiClient,
+  createGeminiPlannerClient,
+} from "../packages/integrations/src/gemini/client.js";
 import {
   directQuery,
   isValidEvidence,
   createEvidenceRecord,
   createVerifiedEdge,
+  InvestigationOrchestrator,
 } from "../packages/core/src/index.js";
+import type { InvestigationEvent } from "../packages/core/src/index.js";
 import type {
   EvidenceRecord,
   VerifiedEdge,
+  VerifiedPath,
 } from "../packages/contracts/src/index.js";
 
 const CONFIDENCE_THRESHOLD = 80;
@@ -355,31 +362,215 @@ async function runPipeline(personA: string, personB: string): Promise<TestResult
   };
 }
 
+// ============================================================================
+// Multi-Hop Mode
+// ============================================================================
+
+function printMultiHopHeader(personA: string, personB: string) {
+  console.log();
+  console.log(styles.header("┌─────────────────────────────────────────────────────────────┐"));
+  console.log(styles.header("│") + chalk.bold.white("       🔗 VISUAL DEGREES MULTI-HOP INVESTIGATION            ") + styles.header("│"));
+  console.log(styles.header("└─────────────────────────────────────────────────────────────┘"));
+  console.log();
+
+  const configTable = new Table({
+    chars: { 'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+             'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+             'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+             'right': '│', 'right-mid': '┤', 'middle': '│' },
+    style: { head: ['cyan'], border: ['dim'] }
+  });
+
+  configTable.push(
+    [styles.dim("Person A"), styles.highlight(personA)],
+    [styles.dim("Person B"), styles.highlight(personB)],
+    [styles.dim("Mode"), styles.accent("Multi-Hop Expansion")],
+    [styles.dim("Max Hops"), styles.accent("6")],
+    [styles.dim("Threshold"), styles.accent(`${CONFIDENCE_THRESHOLD}%`)]
+  );
+
+  console.log(configTable.toString());
+  console.log();
+}
+
+function printPath(path: VerifiedPath) {
+  console.log(styles.header("┌─ Verified Path ───────────────────────────────────────────────┐"));
+  console.log();
+
+  // Print path as a chain
+  const pathStr = path.path
+    .map((p, i) => {
+      if (i === 0) return styles.highlight(p);
+      return styles.accent("→") + " " + styles.highlight(p);
+    })
+    .join(" ");
+  console.log(`  ${pathStr}`);
+  console.log();
+
+  // Print edges table
+  const edgeTable = new Table({
+    head: [styles.dim("Edge"), styles.dim("Confidence"), styles.dim("Evidence"), styles.dim("Source")],
+    chars: { 'top': '─', 'top-mid': '┬', 'top-left': '  ┌', 'top-right': '┐',
+             'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '  └', 'bottom-right': '┘',
+             'left': '  │', 'left-mid': '  ├', 'mid': '─', 'mid-mid': '┼',
+             'right': '│', 'right-mid': '┤', 'middle': '│' },
+    colWidths: [25, 12, 10, 25],
+    wordWrap: true,
+  });
+
+  for (const edge of path.edges) {
+    edgeTable.push([
+      `${edge.from} ↔ ${edge.to}`,
+      styles.success(`${Math.round(edge.edgeConfidence)}%`),
+      edge.evidence.length.toString(),
+      truncateUrl(edge.bestEvidence.contextUrl, 22),
+    ]);
+  }
+
+  console.log(edgeTable.toString());
+  console.log();
+
+  // Print confidence summary
+  const confTable = new Table({
+    chars: { 'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
+             'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
+             'left': '  │ ', 'left-mid': '', 'mid': '', 'mid-mid': '',
+             'right': ' │', 'right-mid': '', 'middle': ' │ ' },
+    colWidths: [25, 30],
+  });
+
+  confTable.push(
+    [styles.dim("Path Bottleneck"), styles.success(`${Math.round(path.confidence.pathBottleneck)}%`)],
+    [styles.dim("Path Cumulative"), styles.accent(`${(path.confidence.pathCumulative * 100).toFixed(2)}%`)]
+  );
+
+  console.log(confTable.toString());
+  console.log();
+}
+
+async function runMultiHopPipeline(personA: string, personB: string): Promise<void> {
+  printMultiHopHeader(personA, personB);
+
+  // Initialize clients
+  const initSpinner = ora({
+    text: "Initializing API clients...",
+    spinner: "dots",
+  }).start();
+
+  const pseClient = createGooglePSEClient();
+  const geminiClient = createGeminiClient();
+  const geminiPlanner = createGeminiPlannerClient();
+  const rekognitionClient = createRekognitionClient();
+
+  initSpinner.succeed("API clients ready (with intelligent planner)");
+  console.log();
+
+  // Create orchestrator with event logging
+  const orchestrator = new InvestigationOrchestrator(
+    {
+      search: pseClient,
+      visualFilter: geminiClient,
+      celebrityDetection: rekognitionClient,
+      planner: geminiPlanner,
+    },
+    {
+      hopLimit: 6,
+      confidenceThreshold: CONFIDENCE_THRESHOLD,
+      imagesPerQuery: 5,
+    },
+    (event: InvestigationEvent) => {
+      // Log events to console with different styling
+      switch (event.type) {
+        case "status":
+          console.log(`  ${styles.info("ℹ")} ${styles.dim(event.message)}`);
+          break;
+        case "evidence":
+          console.log(`  ${styles.success("✓")} ${styles.success(event.message)}`);
+          break;
+        case "path_update":
+          console.log(`  ${styles.accent("→")} ${styles.accent(event.message)}`);
+          break;
+        case "candidate_discovery":
+          console.log(`  ${styles.info("🔍")} ${event.message}`);
+          break;
+        case "llm_selection":
+          console.log(`  ${styles.accent("🤖")} ${event.message}`);
+          break;
+        case "research":
+          console.log();
+          console.log(`  ${chalk.cyan("📚")} ${chalk.cyan(event.message)}`);
+          break;
+        case "strategy":
+          console.log(`  ${chalk.yellow("📋")} ${chalk.yellow(event.message)}`);
+          break;
+        case "thinking":
+          console.log(`  ${chalk.gray("   ")} ${chalk.gray(event.message)}`);
+          break;
+        case "error":
+          console.log(`  ${styles.error("✗")} ${styles.error(event.message)}`);
+          break;
+      }
+    }
+  );
+
+  console.log(styles.header("┌─ Investigation Progress ──────────────────────────────────────┐"));
+  console.log();
+
+  // Run investigation
+  const result = await orchestrator.runInvestigation(personA, personB);
+
+  console.log();
+
+  // Print result
+  if (result.status === "success") {
+    printPath(result.result);
+    console.log(`  ${styles.dim("Disclaimer:")} ${styles.dim(result.disclaimer)}`);
+    console.log();
+  } else {
+    console.log(styles.header("┌─ Result ──────────────────────────────────────────────────────┐"));
+    console.log();
+    console.log(`  ${styles.error("✗")} ${styles.dim(result.message)}`);
+    console.log();
+  }
+}
+
 // Main execution
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.length < 2) {
+  // Check for flags
+  const multiHop = args.includes("--multi-hop") || args.includes("-m");
+  const filteredArgs = args.filter(a => !a.startsWith("-"));
+
+  if (filteredArgs.length < 2) {
     console.log();
     console.log(styles.header("  Usage:"));
-    console.log(`    pnpm test:pipeline ${styles.accent('"Person A"')} ${styles.accent('"Person B"')}`);
+    console.log(`    pnpm test:pipeline ${styles.accent('"Person A"')} ${styles.accent('"Person B"')} ${styles.dim("[--multi-hop]")}`);
     console.log();
-    console.log(styles.header("  Example:"));
+    console.log(styles.header("  Examples:"));
     console.log(`    pnpm test:pipeline ${styles.accent('"Donald Trump"')} ${styles.accent('"Kanye West"')}`);
+    console.log(`    pnpm test:pipeline ${styles.accent('"Donald Trump"')} ${styles.accent('"Cardi B"')} ${styles.dim("--multi-hop")}`);
+    console.log();
+    console.log(styles.header("  Flags:"));
+    console.log(`    ${styles.dim("--multi-hop, -m")}  Enable multi-hop expansion to find indirect paths`);
     console.log();
     process.exit(1);
   }
 
-  const [personA, personB] = args;
+  const [personA, personB] = filteredArgs;
 
   try {
-    const result = await runPipeline(personA, personB);
+    if (multiHop) {
+      await runMultiHopPipeline(personA, personB);
+    } else {
+      const result = await runPipeline(personA, personB);
 
-    // Optional: JSON output for programmatic use
-    if (process.env.JSON_OUTPUT === "true") {
-      console.log(styles.header("┌─ JSON Output ─────────────────────────────────────────────────┐"));
-      console.log();
-      console.log(JSON.stringify(result, null, 2));
+      // Optional: JSON output for programmatic use
+      if (process.env.JSON_OUTPUT === "true") {
+        console.log(styles.header("┌─ JSON Output ─────────────────────────────────────────────────┐"));
+        console.log();
+        console.log(JSON.stringify(result, null, 2));
+      }
     }
   } catch (error) {
     console.log();

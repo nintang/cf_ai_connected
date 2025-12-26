@@ -1,0 +1,24 @@
+{
+  "name": "worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev"
+  },
+  "dependencies": {
+    "@cloudflare/ai-utils": "^1.0.0",
+    "@visual-degrees/contracts": "workspace:*",
+    "@visual-degrees/core": "workspace:*",
+    "@visual-degrees/integrations": "workspace:*",
+    "hono": "^3.12.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "@types/node": "^20.19.27",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.22.4"
+  }
+}

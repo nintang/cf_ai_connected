@@ -5,6 +5,7 @@ import type {
   PathConfidence,
   ImageSearchResult,
   ImageAnalysisResult,
+  Candidate,
 } from "@visual-degrees/contracts";
 
 /**
@@ -15,21 +16,76 @@ export function normalizeName(name: string): string {
 }
 
 /**
- * Check if two names match (case-insensitive)
+ * Extract the last word (surname) from a name
  */
-export function namesMatch(name1: string, name2: string): boolean {
-  return normalizeName(name1) === normalizeName(name2);
+export function extractSurname(name: string): string {
+  const parts = normalizeName(name).split(" ");
+  return parts[parts.length - 1];
 }
 
 /**
- * Find a celebrity in a detection list by name
+ * Extract the first word (first name) from a name
+ */
+export function extractFirstName(name: string): string {
+  const parts = normalizeName(name).split(" ");
+  return parts[0];
+}
+
+/**
+ * Check if two names match using flexible matching:
+ * 1. Exact match (after normalization)
+ * 2. Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
+ * 3. One contains the other (e.g., "Donald Trump" contains "Trump")
+ * 4. Surname + first name match (e.g., "Donald Trump" vs "Donald J. Trump")
+ */
+export function namesMatch(name1: string, name2: string): boolean {
+  const n1 = normalizeName(name1);
+  const n2 = normalizeName(name2);
+
+  // Exact match
+  if (n1 === n2) return true;
+
+  // Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
+  const parts1 = n1.split(" ");
+  const parts2 = n2.split(" ");
+  if (parts1.length === 2 && parts2.length === 2) {
+    if (parts1[0] === parts2[1] && parts1[1] === parts2[0]) return true;
+  }
+
+  // One contains the other
+  if (n1.includes(n2) || n2.includes(n1)) return true;
+
+  // Surname + first name match (handles middle names/initials)
+  const surname1 = extractSurname(name1);
+  const surname2 = extractSurname(name2);
+  const firstName1 = extractFirstName(name1);
+  const firstName2 = extractFirstName(name2);
+
+  if (surname1 === surname2 && firstName1 === firstName2) return true;
+
+  // Surname match only (for cases like just "Trump" or "Obama")
+  if (surname1 === surname2 && (n1.split(" ").length === 1 || n2.split(" ").length === 1)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Find a celebrity in a detection list by name (flexible matching)
  */
 export function findCelebrity(
   celebrities: DetectedCelebrity[],
   targetName: string
 ): DetectedCelebrity | undefined {
-  const normalizedTarget = normalizeName(targetName);
-  return celebrities.find((c) => normalizeName(c.name) === normalizedTarget);
+  // First try exact match
+  const exactMatch = celebrities.find(
+    (c) => normalizeName(c.name) === normalizeName(targetName)
+  );
+  if (exactMatch) return exactMatch;
+
+  // Then try flexible matching
+  return celebrities.find((c) => namesMatch(c.name, targetName));
 }
 
 /**
@@ -195,5 +251,113 @@ export function getCoAppearingCelebrities(
     (c) =>
       !namesMatch(c.name, targetPerson) && c.confidence >= confidenceThreshold
   );
+}
+
+/**
+ * Result from analyzing an image with its search context
+ */
+export interface AnalysisWithContext {
+  analysis: ImageAnalysisResult;
+  contextUrl: string;
+}
+
+/**
+ * Aggregate candidates from multiple image analyses
+ * Merges co-appearing celebrities across images, tracking count and best confidence
+ * Excludes the frontier person and any people already in the path
+ *
+ * @param analyses - Array of image analyses with their context URLs
+ * @param frontier - The current frontier person being expanded
+ * @param excludeNames - Names to exclude (e.g., people already in the path)
+ * @param confidenceThreshold - Minimum confidence to consider (default: 80)
+ * @returns Sorted array of candidates (highest confidence first)
+ */
+export function aggregateCandidates(
+  analyses: AnalysisWithContext[],
+  frontier: string,
+  excludeNames: string[] = [],
+  confidenceThreshold: number = 80
+): Candidate[] {
+  // Build a map of candidate name (normalized) -> aggregated data
+  const candidateMap = new Map<
+    string,
+    {
+      name: string; // Original name (first occurrence)
+      coappearCount: number;
+      bestCoappearConfidence: number;
+      evidenceContextUrls: Set<string>;
+    }
+  >();
+
+  // Names to exclude (normalized)
+  const excludeSet = new Set([
+    normalizeName(frontier),
+    ...excludeNames.map(normalizeName),
+  ]);
+
+  for (const { analysis, contextUrl } of analyses) {
+    // Get co-appearing celebrities from this image
+    const coAppearing = getCoAppearingCelebrities(
+      analysis,
+      frontier,
+      confidenceThreshold
+    );
+
+    for (const celeb of coAppearing) {
+      const normalizedName = normalizeName(celeb.name);
+
+      // Skip excluded names
+      if (excludeSet.has(normalizedName)) {
+        continue;
+      }
+
+      // Check if this matches an existing candidate (flexible matching)
+      let matchedKey: string | null = null;
+      for (const [key] of candidateMap) {
+        if (namesMatch(celeb.name, key)) {
+          matchedKey = key;
+          break;
+        }
+      }
+
+      if (matchedKey) {
+        // Update existing candidate
+        const existing = candidateMap.get(matchedKey)!;
+        existing.coappearCount += 1;
+        existing.bestCoappearConfidence = Math.max(
+          existing.bestCoappearConfidence,
+          celeb.confidence
+        );
+        existing.evidenceContextUrls.add(contextUrl);
+      } else {
+        // Add new candidate
+        candidateMap.set(normalizedName, {
+          name: celeb.name, // Keep original casing
+          coappearCount: 1,
+          bestCoappearConfidence: celeb.confidence,
+          evidenceContextUrls: new Set([contextUrl]),
+        });
+      }
+    }
+  }
+
+  // Convert to array and sort by confidence (desc), then count (desc)
+  const candidates: Candidate[] = Array.from(candidateMap.values()).map(
+    (data) => ({
+      name: data.name,
+      coappearCount: data.coappearCount,
+      bestCoappearConfidence: data.bestCoappearConfidence,
+      evidenceContextUrls: Array.from(data.evidenceContextUrls),
+    })
+  );
+
+  candidates.sort((a, b) => {
+    if (b.bestCoappearConfidence !== a.bestCoappearConfidence) {
+      return b.bestCoappearConfidence - a.bestCoappearConfidence;
+    }
+    return b.coappearCount - a.coappearCount;
+  });
+
+  return candidates;
 }
 

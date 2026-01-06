@@ -3,6 +3,7 @@ export interface Env {
   AI: Ai;
   INVESTIGATION_WORKFLOW: Workflow;
   INVESTIGATION_EVENTS: KVNamespace;
+  GRAPH_DB: D1Database;
 
   // Environment variables
   AWS_REGION: string;

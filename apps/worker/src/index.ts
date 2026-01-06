@@ -1,6 +1,7 @@
 import { Env } from './env';
 import { InvestigationEvent, EventsResponse } from '@visual-degrees/contracts';
 import { OpenRouterClient } from '@visual-degrees/integrations';
+import { getFullGraph, getGraphStats, findPath } from './graph-db';
 export { InvestigationWorkflow } from './workflows/investigation';
 
 // CORS headers for cross-origin requests from the frontend
@@ -179,6 +180,79 @@ export default {
       }
     }
 
+    // GET /api/graph - Get the full social graph for visualization
+    if (url.pathname === "/api/graph" && request.method === "GET") {
+      try {
+        const graph = await getFullGraph(env.GRAPH_DB);
+        return new Response(JSON.stringify(graph), {
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({
+          error: e instanceof Error ? e.message : String(e),
+          nodes: [],
+          edges: []
+        }), {
+          status: 200, // Return empty graph on error (DB might not exist yet)
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+    }
+
+    // GET /api/graph/stats - Get graph statistics
+    if (url.pathname === "/api/graph/stats" && request.method === "GET") {
+      try {
+        const stats = await getGraphStats(env.GRAPH_DB);
+        return new Response(JSON.stringify(stats), {
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({
+          nodeCount: 0,
+          edgeCount: 0,
+          avgConfidence: 0
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+    }
+
+    // GET /api/graph/path - Find shortest path between two people (cached lookup)
+    if (url.pathname === "/api/graph/path" && request.method === "GET") {
+      try {
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+
+        if (!from || !to) {
+          return new Response(JSON.stringify({
+            error: "Missing 'from' or 'to' query parameter"
+          }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+
+        const pathResult = await findPath(env.GRAPH_DB, from, to);
+        return new Response(JSON.stringify(pathResult), {
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({
+          found: false,
+          path: [],
+          pathIds: [],
+          steps: [],
+          hops: 0,
+          minConfidence: 0,
+          error: e instanceof Error ? e.message : String(e)
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+    }
+
     return new Response(JSON.stringify({
       service: "Visual Degrees Worker",
       version: "1.0.0",
@@ -186,9 +260,12 @@ export default {
         "POST /api/chat/parse",
         "POST /api/chat/query",
         "GET /api/chat/events/:runId",
-        "GET /api/chat/status/:instanceId"
+        "GET /api/chat/status/:instanceId",
+        "GET /api/graph",
+        "GET /api/graph/stats",
+        "GET /api/graph/path?from=Person+A&to=Person+B"
       ]
-    }), { 
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders }
     });

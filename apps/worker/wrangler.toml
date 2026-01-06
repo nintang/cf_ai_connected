@@ -21,6 +21,12 @@ name = "investigation"
 binding = "INVESTIGATION_WORKFLOW"
 class_name = "InvestigationWorkflow"
 
+# D1 Database for persistent graph storage
+[[d1_databases]]
+binding = "GRAPH_DB"
+database_name = "visual-degrees-graph"
+database_id = "e06f45af-8e0b-4bf2-a42b-f202f71112b7"
+
 [observability]
 enabled = true
 head_sampling_rate = 1

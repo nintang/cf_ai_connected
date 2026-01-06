@@ -342,13 +342,13 @@ function SegmentDetail({ segment }: { segment: InvestigationSegment }) {
     .map((_, idx) => `step-${idx}`);
 
   return (
-    <div className="space-y-5 overflow-hidden">
+    <div className="space-y-3 sm:space-y-5 overflow-hidden">
       {/* Segment header */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="text-sm font-medium truncate">{segment.from}</span>
-          <ArrowRight size={14} className="text-foreground/30 shrink-0" />
-          <span className="text-sm font-medium truncate">{segment.to}</span>
+      <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+          <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{segment.from}</span>
+          <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
+          <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{segment.to}</span>
         </div>
         <StatusLabel status={segment.status} />
       </div>
@@ -415,20 +415,20 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Compact path overview */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         {names.map((name, idx) => (
-          <div key={idx} className="flex items-center gap-2">
+          <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
             <div className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium",
+              "rounded-md px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none",
               (idx === 0 || idx === names.length - 1) && "bg-foreground text-background",
               idx > 0 && idx < names.length - 1 && "border border-foreground/20 text-foreground"
             )}>
               {name}
             </div>
             {idx < names.length - 1 && (
-              <ArrowRight size={14} className="text-foreground/30" />
+              <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
             )}
           </div>
         ))}
@@ -436,7 +436,7 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
 
       {/* Evidence photos for each hop */}
       {path.length > 0 && (
-        <div className="flex flex-wrap gap-3 pt-2">
+        <div className="flex flex-wrap gap-2 sm:gap-3 pt-1 sm:pt-2">
           {path.map((hop, idx) => {
             const hopEvidence = getEvidenceForHop(hop.from, hop.to);
             const isIntermediary = idx > 0 && idx < path.length - 1;
@@ -445,7 +445,7 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
               <div
                 key={idx}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg border p-2 transition-colors",
+                  "flex items-center gap-1.5 sm:gap-2 rounded-lg border p-1.5 sm:p-2 transition-colors",
                   isIntermediary
                     ? "border-foreground/15 bg-foreground/[0.02]"
                     : "border-foreground/20 bg-foreground/[0.03]"
@@ -461,24 +461,24 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
                     <img
                       src={hopEvidence.thumbnailUrl}
                       alt={`${hop.from} with ${hop.to}`}
-                      className="size-12 object-cover"
+                      className="size-10 sm:size-12 object-cover"
                     />
                     <div className="absolute bottom-0.5 right-0.5 rounded bg-foreground/80 p-0.5">
                       <Check size={8} className="text-background" strokeWidth={3} />
                     </div>
                   </a>
                 ) : (
-                  <div className="flex size-12 items-center justify-center rounded-md bg-foreground/5 shrink-0">
-                    <ImageIcon size={16} className="text-foreground/30" />
+                  <div className="flex size-10 sm:size-12 items-center justify-center rounded-md bg-foreground/5 shrink-0">
+                    <ImageIcon size={14} className="text-foreground/30 sm:size-[16px]" />
                   </div>
                 )}
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1 text-xs font-medium">
-                    <span className="truncate max-w-[60px]">{hop.from.split(' ').pop()}</span>
-                    <ArrowRight size={10} className="text-foreground/40 shrink-0" />
-                    <span className="truncate max-w-[60px]">{hop.to.split(' ').pop()}</span>
+                  <div className="flex items-center gap-1 text-[10px] sm:text-xs font-medium">
+                    <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.from.split(' ').pop()}</span>
+                    <ArrowRight size={8} className="text-foreground/40 shrink-0 sm:size-[10px]" />
+                    <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.to.split(' ').pop()}</span>
                   </div>
-                  <div className="text-[10px] text-foreground/50 mt-0.5">
+                  <div className="text-[9px] sm:text-[10px] text-foreground/50 mt-0.5">
                     {Math.ceil(hop.confidence)}% match
                   </div>
                 </div>
@@ -524,6 +524,7 @@ export function InvestigationTracker({
 
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [userSelectedTab, setUserSelectedTab] = useState(false);
+  const [showSegmentDetails, setShowSegmentDetails] = useState(false);
 
   // Only auto-switch tabs if user hasn't manually selected one
   useEffect(() => {
@@ -541,6 +542,7 @@ export function InvestigationTracker({
   const handleTabChange = (segmentId: string) => {
     setUserSelectedTab(true);
     setActiveSegmentId(segmentId);
+    setShowSegmentDetails(true); // On mobile, show details when selecting
   };
 
   const hasSegments = state.segments.length > 0;
@@ -549,66 +551,66 @@ export function InvestigationTracker({
   return (
     <div className={cn("w-full h-full", className)}>
       {/* Two-column layout for wider screens */}
-      <div className="flex flex-col lg:flex-row gap-6 h-full">
+      <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 h-full">
         {/* Left column - Status and Path */}
-        <div className="lg:w-[400px] xl:w-[480px] shrink-0 space-y-4">
+        <div className="lg:w-[340px] xl:w-[400px] shrink-0 space-y-3 sm:space-y-4">
           {/* Header Card */}
           <Card className={cn(
-            "rounded-xl border py-0 shadow-sm",
+            "rounded-lg sm:rounded-xl border py-0 shadow-sm",
             isCompleted && "border-foreground/30"
           )}>
-            <CardHeader className="pb-3 pt-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    {isRunning && <Loader2 size={16} className="text-foreground/60 animate-spin" />}
+            <CardHeader className="pb-2 sm:pb-3 pt-3 sm:pt-4 px-3 sm:px-6">
+              <div className="flex items-start justify-between gap-3 sm:gap-4">
+                <div className="space-y-0.5 sm:space-y-1 min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    {isRunning && <Loader2 size={14} className="text-foreground/60 animate-spin shrink-0 sm:size-[16px]" />}
                     {isCompleted && (
-                      <div className="flex items-center justify-center rounded bg-foreground p-0.5">
-                        <Check size={12} className="text-background" strokeWidth={3} />
+                      <div className="flex items-center justify-center rounded bg-foreground p-0.5 shrink-0">
+                        <Check size={10} className="text-background sm:size-[12px]" strokeWidth={3} />
                       </div>
                     )}
                     {isFailed && (
-                      <div className="flex items-center justify-center rounded border border-foreground/30 p-0.5">
-                        <X size={12} className="text-foreground/50" strokeWidth={2.5} />
+                      <div className="flex items-center justify-center rounded border border-foreground/30 p-0.5 shrink-0">
+                        <X size={10} className="text-foreground/50 sm:size-[12px]" strokeWidth={2.5} />
                       </div>
                     )}
 
-                    <CardTitle className="text-base font-semibold">
+                    <CardTitle className="text-sm sm:text-base font-semibold truncate">
                       {isRunning && "Investigating"}
                       {isCompleted && "Connection Found"}
                       {isFailed && "No Connection"}
                     </CardTitle>
                   </div>
 
-                  <CardDescription className="text-sm">
+                  <CardDescription className="text-xs sm:text-sm truncate">
                     {state.query.personA}
-                    <span className="mx-1.5 text-foreground/30">→</span>
+                    <span className="mx-1 sm:mx-1.5 text-foreground/30">→</span>
                     {state.query.personB}
                   </CardDescription>
                 </div>
 
                 {hasSegments && (
-                  <div className="text-right">
-                    <div className="text-2xl font-semibold tabular-nums tracking-tight">
+                  <div className="text-right shrink-0">
+                    <div className="text-xl sm:text-2xl font-semibold tabular-nums tracking-tight">
                       {state.segments.filter((s) => s.status === "success").length}
                       <span className="text-foreground/20 mx-0.5">/</span>
                       <span className="text-foreground/50">{state.segments.length}</span>
                     </div>
-                    <div className="text-[10px] text-foreground/40 uppercase tracking-wide">segments</div>
+                    <div className="text-[9px] sm:text-[10px] text-foreground/40 uppercase tracking-wide">segments</div>
                   </div>
                 )}
               </div>
 
               {hasSegments && (
-                <div className="pt-3">
+                <div className="pt-2 sm:pt-3">
                   <ProgressBar segments={state.segments} />
                 </div>
               )}
             </CardHeader>
 
             {isRunning && state.currentPath.length > 0 && (
-              <CardContent className="pt-0 pb-4 border-t border-dashed border-foreground/8">
-                <div className="text-[10px] text-foreground/40 uppercase tracking-wide mb-2 pt-3">
+              <CardContent className="pt-0 pb-3 sm:pb-4 px-3 sm:px-6 border-t border-dashed border-foreground/8">
+                <div className="text-[9px] sm:text-[10px] text-foreground/40 uppercase tracking-wide mb-1.5 sm:mb-2 pt-2 sm:pt-3">
                   Exploring
                 </div>
                 <CurrentPath path={state.currentPath} target={state.query.personB} />
@@ -616,43 +618,44 @@ export function InvestigationTracker({
             )}
 
             {isCompleted && state.path.length > 0 && (
-              <CardContent className="pt-0 pb-4 border-t border-foreground/10">
-                <div className="pt-4">
+              <CardContent className="pt-0 pb-3 sm:pb-4 px-3 sm:px-6 border-t border-foreground/10">
+                <div className="pt-3 sm:pt-4">
                   <FinalPath path={state.path} evidence={state.evidence} />
                 </div>
               </CardContent>
             )}
           </Card>
 
-          {/* Segment selector - vertical list on desktop */}
+          {/* Segment selector - horizontal scroll on mobile, vertical on desktop */}
           {hasSegments && (
-            <div className="space-y-1.5">
-              <div className="text-[10px] text-foreground/40 uppercase tracking-wide px-1">
+            <div className="space-y-1 sm:space-y-1.5">
+              <div className="text-[9px] sm:text-[10px] text-foreground/40 uppercase tracking-wide px-1">
                 Segments
               </div>
-              <div className="flex flex-col gap-1">
+              {/* Mobile: horizontal scroll */}
+              <div className="flex lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0 scrollbar-thin">
                 {state.segments.map((segment) => (
                   <button
                     key={segment.id}
                     onClick={() => handleTabChange(segment.id)}
                     className={cn(
-                      "w-full rounded-lg px-3 py-2.5 text-left text-sm border transition-all",
-                      "flex items-center justify-between gap-2",
+                      "rounded-lg px-2.5 sm:px-3 py-2 sm:py-2.5 text-left text-xs sm:text-sm border transition-all shrink-0 lg:shrink lg:w-full",
+                      "flex items-center justify-between gap-1.5 sm:gap-2",
                       activeSegmentId === segment.id
                         ? "bg-foreground text-background border-foreground shadow-sm"
                         : "border-foreground/10 text-foreground/70 hover:border-foreground/20 hover:bg-foreground/[0.02]",
                       segment.status === "failed" && activeSegmentId !== segment.id && "opacity-50"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="truncate">{segment.from}</span>
-                      <ArrowRight size={12} className="opacity-40 shrink-0" />
-                      <span className="truncate">{segment.to}</span>
+                    <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+                      <span className="truncate max-w-[80px] sm:max-w-none">{segment.from}</span>
+                      <ArrowRight size={10} className="opacity-40 shrink-0 sm:size-[12px]" />
+                      <span className="truncate max-w-[80px] sm:max-w-none">{segment.to}</span>
                     </div>
                     <div className="shrink-0">
-                      {segment.status === "running" && <Loader2 size={12} className="animate-spin" />}
-                      {segment.status === "success" && <Check size={12} strokeWidth={2.5} />}
-                      {segment.status === "failed" && <X size={12} className="opacity-50" />}
+                      {segment.status === "running" && <Loader2 size={10} className="animate-spin sm:size-[12px]" />}
+                      {segment.status === "success" && <Check size={10} strokeWidth={2.5} className="sm:size-[12px]" />}
+                      {segment.status === "failed" && <X size={10} className="opacity-50 sm:size-[12px]" />}
                     </div>
                   </button>
                 ))}
@@ -664,20 +667,20 @@ export function InvestigationTracker({
         {/* Right column - Segment Details */}
         <div className="flex-1 min-w-0 overflow-hidden lg:overflow-auto">
           {activeSegment ? (
-            <Card className="rounded-xl border shadow-sm h-full overflow-hidden">
-              <CardContent className="pt-5 pb-5 overflow-auto max-h-full">
+            <Card className="rounded-lg sm:rounded-xl border shadow-sm h-full overflow-hidden">
+              <CardContent className="pt-3 sm:pt-5 pb-3 sm:pb-5 px-3 sm:px-6 overflow-auto max-h-full">
                 <SegmentDetail segment={activeSegment} />
               </CardContent>
             </Card>
           ) : !hasSegments && state.steps.length > 0 ? (
             /* Legacy steps */
-            <Card className="rounded-xl border shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs text-foreground/40 uppercase tracking-wide">
+            <Card className="rounded-lg sm:rounded-xl border shadow-sm">
+              <CardHeader className="pb-2 px-3 sm:px-6">
+                <CardTitle className="text-[9px] sm:text-xs text-foreground/40 uppercase tracking-wide">
                   Progress
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pb-4">
+              <CardContent className="pb-3 sm:pb-4 px-3 sm:px-6">
                 <Accordion
                   type="multiple"
                   defaultValue={state.steps.filter(s => s.status === "running").map((_, i) => `legacy-step-${i}`)}
@@ -690,15 +693,15 @@ export function InvestigationTracker({
             </Card>
           ) : isCompleted ? (
             /* Cached result - no segments but completed */
-            <Card className="rounded-xl border shadow-sm">
-              <CardContent className="pt-5 pb-5">
+            <Card className="rounded-lg sm:rounded-xl border shadow-sm">
+              <CardContent className="pt-4 sm:pt-5 pb-4 sm:pb-5 px-3 sm:px-6">
                 <div className="text-center text-foreground/50">
-                  <Check size={24} className="mx-auto mb-2 text-foreground" />
-                  <p className="text-sm">Connection found from cached data</p>
+                  <Check size={20} className="mx-auto mb-2 text-foreground sm:size-[24px]" />
+                  <p className="text-xs sm:text-sm">Connection found from cached data</p>
                   {onSearchDeeper && (
                     <button
                       onClick={onSearchDeeper}
-                      className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 rounded-md transition-colors"
+                      className="mt-2 sm:mt-3 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 rounded-md transition-colors"
                     >
                       <RefreshCw size={12} />
                       Run fresh investigation
@@ -708,10 +711,10 @@ export function InvestigationTracker({
               </CardContent>
             </Card>
           ) : (
-            <div className="h-full flex items-center justify-center text-foreground/30">
+            <div className="h-32 sm:h-full flex items-center justify-center text-foreground/30">
               <div className="text-center">
-                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
-                <p className="text-sm">Starting investigation...</p>
+                <Loader2 size={20} className="animate-spin mx-auto mb-2 sm:size-[24px]" />
+                <p className="text-xs sm:text-sm">Starting investigation...</p>
               </div>
             </div>
           )}

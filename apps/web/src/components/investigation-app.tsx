@@ -1,14 +1,15 @@
 "use client"
 
-import { useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback, useEffect } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, PanelRightOpen, Expand } from "lucide-react"
+import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, PanelRightOpen, Expand, Menu, X } from "lucide-react"
 import { parseQuery } from "@/lib/query-parser"
 import { InvestigationTracker } from "@/components/investigation/investigation-tracker"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 // Dynamic import for SocialGraph (requires DOM)
 const SocialGraph = dynamic(
@@ -321,31 +322,46 @@ export function InvestigationApp() {
   const stopPollingRef = useRef<(() => void) | null>(null)
   const [cachedPath, setCachedPath] = useState<CachedPathResult | null>(null)
   const [graphStats, setGraphStats] = useState({ nodes: 0, edges: 0 })
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const isMobile = useIsMobile()
 
-  // Handle resize drag
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  // On mobile, graph should be hidden by default during investigation
+  useEffect(() => {
+    if (isMobile && investigationState) {
+      setShowGraph(false)
+    }
+  }, [isMobile, investigationState])
+
+  // Handle resize drag (supports both mouse and touch)
+  const handleResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault()
     setIsResizing(true)
 
-    const startX = e.clientX
+    const isTouch = 'touches' in e
+    const startX = isTouch ? e.touches[0].clientX : e.clientX
     const startWidth = graphWidth
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const delta = startX - e.clientX
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+      const delta = startX - clientX
       const newWidth = Math.min(Math.max(startWidth + delta, 250), 800)
       setGraphWidth(newWidth)
     }
 
-    const handleMouseUp = () => {
+    const handleEnd = () => {
       setIsResizing(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mousemove', handleMove)
+      document.removeEventListener('mouseup', handleEnd)
+      document.removeEventListener('touchmove', handleMove)
+      document.removeEventListener('touchend', handleEnd)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
 
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('mousemove', handleMove)
+    document.addEventListener('mouseup', handleEnd)
+    document.addEventListener('touchmove', handleMove, { passive: false })
+    document.addEventListener('touchend', handleEnd)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }, [graphWidth])
@@ -545,14 +561,15 @@ export function InvestigationApp() {
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shrink-0 z-50">
-        <div className="px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-primary/10 size-9 rounded-lg flex items-center justify-center">
-              <Search className="size-4 text-primary" />
+        <div className="px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-4">
+          {/* Logo and nav */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="bg-primary/10 size-8 sm:size-9 rounded-lg flex items-center justify-center">
+              <Search className="size-3.5 sm:size-4 text-primary" />
             </div>
-            <h1 className="text-lg font-semibold tracking-tight">Visual Degrees</h1>
-            <div className="h-5 w-px bg-border ml-2" />
-            <Link href="/graph">
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight hidden xs:block">Visual Degrees</h1>
+            <div className="hidden sm:block h-5 w-px bg-border ml-2" />
+            <Link href="/graph" className="hidden sm:block">
               <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
                 <Network className="size-4" />
                 Graph
@@ -560,10 +577,10 @@ export function InvestigationApp() {
             </Link>
           </div>
 
-          {/* Search bar in header when investigation is active */}
+          {/* Search bar in header when investigation is active - hidden on mobile */}
           {investigationState && (
-            <form onSubmit={handleSubmit} className="flex-1 max-w-md mx-8">
-              <div className="relative">
+            <form onSubmit={handleSubmit} className="hidden md:flex flex-1 max-w-md mx-4 lg:mx-8">
+              <div className="relative w-full">
                 <Input
                   type="text"
                   placeholder="e.g., Sarkodie and Obama together"
@@ -589,47 +606,96 @@ export function InvestigationApp() {
             </form>
           )}
 
-          {investigationState && (
-            <div className="flex items-center gap-2">
-              {isLoading && (
+          {/* Action buttons */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {investigationState && (
+              <>
+                {isLoading && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleStop}
+                    className="gap-1.5 sm:gap-2 h-7 sm:h-8 px-2 sm:px-3"
+                  >
+                    <Square className="size-3 fill-current" />
+                    <span className="hidden sm:inline">Stop</span>
+                  </Button>
+                )}
                 <Button
-                  variant="destructive"
+                  variant="outline"
                   size="sm"
-                  onClick={handleStop}
-                  className="gap-2 h-8"
+                  onClick={handleNewSearch}
+                  className="gap-1.5 sm:gap-2 h-7 sm:h-8 px-2 sm:px-3"
                 >
-                  <Square className="size-3 fill-current" />
-                  Stop
+                  <RotateCcw className="size-3" />
+                  <span className="hidden sm:inline">New</span>
                 </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleNewSearch}
-                className="gap-2 h-8"
-              >
-                <RotateCcw className="size-3" />
-                New
-              </Button>
-            </div>
-          )}
+              </>
+            )}
+            {/* Mobile menu button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-7 w-7 p-0"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            >
+              {mobileMenuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+            </Button>
+          </div>
         </div>
+
+        {/* Mobile dropdown menu */}
+        {mobileMenuOpen && (
+          <div className="sm:hidden border-t bg-background px-3 py-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <Link href="/graph" onClick={() => setMobileMenuOpen(false)}>
+              <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
+                <Network className="size-4" />
+                View Graph
+              </Button>
+            </Link>
+            {investigationState && (
+              <form onSubmit={(e) => { handleSubmit(e); setMobileMenuOpen(false); }} className="relative">
+                <Input
+                  type="text"
+                  placeholder="New search..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="h-9 pr-10 rounded-lg bg-muted/50 text-sm"
+                  disabled={isLoading}
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!query.trim() || isLoading}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-md"
+                  variant="ghost"
+                >
+                  {isLoading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="size-4" />
+                  )}
+                </Button>
+              </form>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">
         {!investigationState ? (
           /* Search Form - Centered when no investigation */
-          <div className="h-full flex flex-col items-center justify-center px-4 pb-24">
-            <div className="w-full max-w-xl space-y-8">
-              <div className="text-center space-y-2">
-                <h2 className="text-3xl font-bold tracking-tight">Who is connected to who?</h2>
-                <p className="text-muted-foreground">
+          <div className="h-full flex flex-col items-center justify-center px-3 sm:px-4 pb-16 sm:pb-24">
+            <div className="w-full max-w-xl space-y-5 sm:space-y-8">
+              <div className="text-center space-y-1.5 sm:space-y-2">
+                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Who is connected to who?</h2>
+                <p className="text-sm sm:text-base text-muted-foreground px-2">
                   Find visual proof of connections between any two people through photos
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
                 <div className="relative">
                   <Input
                     type="text"
@@ -637,7 +703,7 @@ export function InvestigationApp() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     className={cn(
-                      "h-14 text-lg px-5 pr-14 rounded-2xl",
+                      "h-12 sm:h-14 text-base sm:text-lg px-4 sm:px-5 pr-12 sm:pr-14 rounded-xl sm:rounded-2xl",
                       "bg-muted/50 border-muted-foreground/20",
                       "focus:bg-background focus:border-primary/50",
                       "transition-all duration-200"
@@ -648,12 +714,12 @@ export function InvestigationApp() {
                     type="submit"
                     size="icon"
                     disabled={!query.trim() || isLoading}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 size-10 rounded-xl"
+                    className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 size-9 sm:size-10 rounded-lg sm:rounded-xl"
                   >
                     {isLoading ? (
-                      <Loader2 className="size-5 animate-spin" />
+                      <Loader2 className="size-4 sm:size-5 animate-spin" />
                     ) : (
-                      <ArrowRight className="size-5" />
+                      <ArrowRight className="size-4 sm:size-5" />
                     )}
                   </Button>
                 </div>
@@ -664,8 +730,8 @@ export function InvestigationApp() {
               </form>
 
               <div className="text-center">
-                <p className="text-sm text-muted-foreground mb-3">Try these examples:</p>
-                <div className="flex flex-wrap justify-center gap-2">
+                <p className="text-xs sm:text-sm text-muted-foreground mb-2 sm:mb-3">Try these examples:</p>
+                <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
                   {[
                     "Donald Trump to Cardi B",
                     "Elon Musk to Beyonce",
@@ -675,7 +741,7 @@ export function InvestigationApp() {
                       key={example}
                       variant="secondary"
                       size="sm"
-                      className="rounded-full text-xs"
+                      className="rounded-full text-xs h-7 sm:h-8 px-2.5 sm:px-3"
                       onClick={() => {
                         setQuery(example);
                       }}
@@ -689,18 +755,18 @@ export function InvestigationApp() {
           </div>
         ) : (
           /* Investigation View - Split layout */
-          <div className="h-full flex">
-            {/* Left panel - Investigation tracker */}
+          <div className="h-full flex flex-col md:flex-row relative">
+            {/* Main panel - Investigation tracker */}
             <div className={cn(
-              "h-full overflow-auto transition-all duration-300",
-              showGraph ? "flex-1" : "w-full"
+              "h-full overflow-auto transition-all duration-300 w-full",
+              showGraph && !isMobile ? "md:flex-1" : "w-full"
             )}>
               {error && (
-                <p className="text-sm text-destructive px-6 pt-4">{error}</p>
+                <p className="text-sm text-destructive px-4 sm:px-6 pt-3 sm:pt-4">{error}</p>
               )}
               <InvestigationTracker
                 state={investigationState}
-                className="p-6"
+                className="p-3 sm:p-4 md:p-6"
                 onSearchDeeper={cachedPath ? () => {
                   setIsLoading(true);
                   runFreshInvestigation(investigationState.query.personA, investigationState.query.personB);
@@ -708,16 +774,17 @@ export function InvestigationApp() {
               />
             </div>
 
-            {/* Right panel - Live graph */}
-            {showGraph && (
+            {/* Desktop: Side panel graph */}
+            {showGraph && !isMobile && (
               <>
-                {/* Resize handle */}
+                {/* Resize handle - desktop only */}
                 <div
                   className={cn(
-                    "w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 cursor-col-resize transition-all shrink-0 relative group",
+                    "hidden md:block w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 cursor-col-resize transition-all shrink-0 relative group touch-none",
                     isResizing && "w-1.5 bg-primary/30"
                   )}
                   onMouseDown={handleResizeStart}
+                  onTouchStart={handleResizeStart}
                 >
                   <div className={cn(
                     "absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-primary/40 transition-colors",
@@ -726,7 +793,7 @@ export function InvestigationApp() {
                 </div>
 
                 <div
-                  className="border-l bg-zinc-50 flex flex-col shrink-0"
+                  className="hidden md:flex border-l bg-zinc-50 flex-col shrink-0"
                   style={{ width: graphWidth }}
                 >
                   {/* Graph header */}
@@ -734,7 +801,7 @@ export function InvestigationApp() {
                     <div className="flex items-center gap-2 min-w-0">
                       <Network className="size-4 text-primary shrink-0" />
                       <span className="text-sm font-medium truncate">Live Graph</span>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap hidden lg:inline">
                         {graphStats.nodes} people, {graphStats.edges} connections
                       </span>
                     </div>
@@ -769,16 +836,62 @@ export function InvestigationApp() {
               </>
             )}
 
-            {/* Toggle button when graph is hidden */}
+            {/* Mobile: Full-screen graph overlay */}
+            {showGraph && isMobile && (
+              <div className="fixed inset-0 z-50 bg-background flex flex-col animate-in slide-in-from-bottom duration-300">
+                {/* Mobile graph header */}
+                <div className="px-3 py-2 border-b bg-white flex items-center justify-between gap-2 shrink-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Network className="size-4 text-primary shrink-0" />
+                    <span className="text-sm font-medium">Live Graph</span>
+                    <span className="text-xs text-muted-foreground">
+                      {graphStats.nodes} people
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Link href="/graph" target="_blank">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        title="Open full graph"
+                      >
+                        <Expand className="size-4" />
+                      </Button>
+                    </Link>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setShowGraph(false)}
+                      title="Close graph"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Graph visualization - mobile */}
+                <div className="flex-1 min-h-0 bg-zinc-50">
+                  <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
+                </div>
+              </div>
+            )}
+
+            {/* Floating toggle button when graph is hidden */}
             {!showGraph && (
               <Button
                 variant="outline"
                 size="sm"
-                className="fixed bottom-4 right-4 gap-2 shadow-lg"
+                className={cn(
+                  "fixed bottom-4 right-4 gap-2 shadow-lg z-40",
+                  "h-10 sm:h-9 px-3 sm:px-4"
+                )}
                 onClick={() => setShowGraph(true)}
               >
-                <PanelRightOpen className="size-4" />
-                Show Graph
+                <Network className="size-4" />
+                <span className="hidden sm:inline">Show Graph</span>
+                <span className="sm:hidden">Graph</span>
               </Button>
             )}
           </div>

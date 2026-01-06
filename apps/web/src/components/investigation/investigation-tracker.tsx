@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Minus,
   Maximize2,
+  RefreshCw,
 } from "lucide-react";
 import type {
   InvestigationState,
@@ -29,6 +30,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 interface InvestigationTrackerProps {
   state: InvestigationState;
   className?: string;
+  onSearchDeeper?: () => void;
 }
 
 // Icon-based status indicator
@@ -107,7 +109,7 @@ function BridgeCandidates({ candidates, selected, showReasoning = false }: {
                   "text-[10px]",
                   isSelected ? "text-background/70" : "text-foreground/40"
                 )}>
-                  {candidate.score}%
+                  {Math.round(candidate.score)}%
                 </span>
               )}
             </span>
@@ -240,7 +242,7 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
                   className="inline-flex items-center gap-1 rounded-md bg-foreground/5 px-2 py-0.5 text-xs"
                 >
                   {celeb.name}
-                  <span className="text-foreground/40">{celeb.confidence}%</span>
+                  <span className="text-foreground/40">{Math.round(celeb.confidence)}%</span>
                 </span>
               ))}
             </div>
@@ -264,7 +266,7 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
                         className="inline-flex items-center gap-1 rounded-md bg-white/20 px-2 py-0.5 text-xs text-white"
                       >
                         {celeb.name}
-                        <span className="text-white/70">{celeb.confidence}%</span>
+                        <span className="text-white/70">{Math.round(celeb.confidence)}%</span>
                       </span>
                     ))}
                   </div>
@@ -514,6 +516,7 @@ function ProgressBar({ segments }: { segments: InvestigationSegment[] }) {
 export function InvestigationTracker({
   state,
   className,
+  onSearchDeeper,
 }: InvestigationTrackerProps) {
   const isRunning = state.status === "running";
   const isCompleted = state.status === "completed";
@@ -683,6 +686,25 @@ export function InvestigationTracker({
                     <StepItem key={`${step.id}-${idx}`} step={step} value={`legacy-step-${idx}`} />
                   ))}
                 </Accordion>
+              </CardContent>
+            </Card>
+          ) : isCompleted ? (
+            /* Cached result - no segments but completed */
+            <Card className="rounded-xl border shadow-sm">
+              <CardContent className="pt-5 pb-5">
+                <div className="text-center text-foreground/50">
+                  <Check size={24} className="mx-auto mb-2 text-foreground" />
+                  <p className="text-sm">Connection found from cached data</p>
+                  {onSearchDeeper && (
+                    <button
+                      onClick={onSearchDeeper}
+                      className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 rounded-md transition-colors"
+                    >
+                      <RefreshCw size={12} />
+                      Run fresh investigation
+                    </button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ) : (

@@ -23,6 +23,7 @@ import {
   createVerifiedEdge,
   calculatePathConfidence
 } from "@visual-degrees/core";
+import { upsertEdge } from "../graph-db";
 
 interface Params {
   personA: string;
@@ -208,25 +209,26 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         const searchRes = await searchImages({ query });
         const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
         const evidence = [];
-        let imageIndex = 0;
+        let validImageIndex = 0;
 
         for (const img of images) {
-          imageIndex++;
           if (!checkBudget()) break;
 
           try {
             // Visual check
             const visual = await verifyCopresence({ imageUrl: img.imageUrl });
             if (!visual.isValidScene) {
-              await emit("image_result", `[${imageIndex}/${images.length}] Collage - ${visual.reason}`, {
-                imageIndex,
-                totalImages: images.length,
+              // Don't count collages - just emit without incrementing
+              await emit("image_result", `Collage - ${visual.reason}`, {
                 imageUrl: img.thumbnailUrl,
                 status: "collage",
                 reason: visual.reason,
               });
               continue;
             }
+
+            // Valid image - increment counter
+            validImageIndex++;
 
             // Detect celebrities with Rekognition
             state.budgets.rekognitionCallsUsed++;
@@ -237,9 +239,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               if (record) {
                 evidence.push(record);
                 const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                await emit("image_result", `[${imageIndex}/${images.length}] ✓ Evidence - ${personA} & ${personB}`, {
-                  imageIndex,
-                  totalImages: images.length,
+                await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${personA} & ${personB}`, {
+                  imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
                   status: "evidence",
                   celebrities: celebs,
@@ -269,9 +270,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     imageScore: aiVerification.overallConfidence,
                   };
                   evidence.push(aiRecord);
-                  await emit("image_result", `[${imageIndex}/${images.length}] ✓ AI Evidence - ${personA} & ${personB}`, {
-                    imageIndex,
-                    totalImages: images.length,
+                  await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${personA} & ${personB}`, {
+                    imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
                     status: "evidence",
                     celebrities: [
@@ -282,9 +282,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     aiNotes: aiVerification.notes,
                   });
                 } else {
-                  await emit("image_result", `[${imageIndex}/${images.length}] No target match`, {
-                    imageIndex,
-                    totalImages: images.length,
+                  await emit("image_result", `[${validImageIndex}] No match`, {
+                    imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
                     status: "no_match",
                     celebrities: celebs,
@@ -292,9 +291,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 }
               } catch (aiError) {
                 // AI verification failed - just report no match (don't fail the whole process)
-                await emit("image_result", `[${imageIndex}/${images.length}] No target match`, {
-                  imageIndex,
-                  totalImages: images.length,
+                await emit("image_result", `[${validImageIndex}] No match`, {
+                  imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
                   status: "no_match",
                   celebrities: celebs,
@@ -302,9 +300,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               }
             }
           } catch (imgError) {
-            await emit("image_result", `[${imageIndex}/${images.length}] Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
-              imageIndex,
-              totalImages: images.length,
+            // Don't count errors - just emit without incrementing
+            await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
               imageUrl: img.thumbnailUrl,
               status: "error",
               reason: imgError instanceof Error ? imgError.message : String(imgError),
@@ -337,7 +334,22 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         },
       });
 
-      await completeStep("direct_check", true, `Direct connection verified with ${directEdge.edgeConfidence}% confidence!`);
+      // Persist edge to social graph database
+      try {
+        await upsertEdge(
+          this.env.GRAPH_DB,
+          personA,
+          personB,
+          directEdge.edgeConfidence,
+          directEdge.bestEvidence.imageUrl,
+          directEdge.bestEvidence.thumbnailUrl,
+          directEdge.bestEvidence.contextUrl
+        );
+      } catch (dbError) {
+        console.error("Failed to persist edge to graph DB:", dbError);
+      }
+
+      await completeStep("direct_check", true, `Direct connection verified with ${Math.round(directEdge.edgeConfidence)}% confidence!`);
 
       await emit("path_update", `Path complete: ${state.path.join(" → ")}`, {
         path: state.path,
@@ -345,7 +357,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       });
 
       const result = this.finalizeSuccess(state, directEdge);
-      await emit("final", `Investigation complete! Found direct connection with ${directEdge.edgeConfidence}% confidence.`, {
+      await emit("final", `Investigation complete! Found direct connection with ${Math.round(directEdge.edgeConfidence)}% confidence.`, {
         result: result.status === "success" ? result.result : undefined,
       });
 
@@ -617,7 +629,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         const edgeToCandidate = await step.do(`verify-${dfsStack.length}-${candidateName}`, async () => {
           const queries = verificationQueries(currentFrontier, candidateName);
           const evidence = [];
-          let totalImagesProcessed = 0;
+          let validImageIndex = 0;
 
           for (const q of queries) {
             if (!checkBudget()) break;
@@ -626,18 +638,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             try {
               const searchRes = await searchImages({ query: q });
               const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
-              const totalImages = images.length;
 
               for (const img of images) {
                 if (!checkBudget()) break;
-                totalImagesProcessed++;
 
                 try {
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
-                    await emit("image_result", `[${totalImagesProcessed}/${totalImages}] Collage - ${visual.reason}`, {
-                      imageIndex: totalImagesProcessed,
-                      totalImages,
+                    await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
                       reason: visual.reason,
@@ -645,6 +653,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     continue;
                   }
 
+                  validImageIndex++;
                   state.budgets.rekognitionCallsUsed++;
                   const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
@@ -653,9 +662,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                      await emit("image_result", `[${totalImagesProcessed}/${totalImages}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
-                        imageIndex: totalImagesProcessed,
-                        totalImages,
+                      await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
+                        imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "evidence",
                         celebrities: celebs,
@@ -683,9 +691,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           imageScore: aiVerification.overallConfidence,
                         };
                         evidence.push(aiRecord);
-                        await emit("image_result", `[${totalImagesProcessed}/${totalImages}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
-                          imageIndex: totalImagesProcessed,
-                          totalImages,
+                        await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
+                          imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
                           status: "evidence",
                           celebrities: [
@@ -695,18 +702,16 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           aiVerified: true,
                         });
                       } else {
-                        await emit("image_result", `[${totalImagesProcessed}/${totalImages}] No target match`, {
-                          imageIndex: totalImagesProcessed,
-                          totalImages,
+                        await emit("image_result", `[${validImageIndex}] No match`, {
+                          imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
                           status: "no_match",
                           celebrities: celebs,
                         });
                       }
                     } catch (aiError) {
-                      await emit("image_result", `[${totalImagesProcessed}/${totalImages}] No target match`, {
-                        imageIndex: totalImagesProcessed,
-                        totalImages,
+                      await emit("image_result", `[${validImageIndex}] No match`, {
+                        imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "no_match",
                         celebrities: celebs,
@@ -714,9 +719,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
-                  await emit("image_result", `[${totalImagesProcessed}/${totalImages}] Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
-                    imageIndex: totalImagesProcessed,
-                    totalImages,
+                  await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",
                     reason: imgError instanceof Error ? imgError.message : String(imgError),
@@ -766,7 +769,22 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           },
         });
 
-        await completeStep("verify_bridge", true, `Connection verified with ${edgeToCandidate.edgeConfidence}% confidence`);
+        // Persist edge to social graph database
+        try {
+          await upsertEdge(
+            this.env.GRAPH_DB,
+            currentFrontier,
+            candidateName,
+            edgeToCandidate.edgeConfidence,
+            edgeToCandidate.bestEvidence.imageUrl,
+            edgeToCandidate.bestEvidence.thumbnailUrl,
+            edgeToCandidate.bestEvidence.contextUrl
+          );
+        } catch (dbError) {
+          console.error("Failed to persist edge to graph DB:", dbError);
+        }
+
+        await completeStep("verify_bridge", true, `Connection verified with ${Math.round(edgeToCandidate.edgeConfidence)}% confidence`);
 
         await emit("path_update", `Path updated: ${state.path.join(" → ")}`, {
           path: state.path,
@@ -788,7 +806,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         const bridgeEdge = await step.do(`bridge-${dfsStack.length}-${candidateName}`, async () => {
           const queries = bridgeQueries(candidateName, personB);
           const evidence = [];
-          let totalImagesProcessed = 0;
+          let validImageIndex = 0;
 
           for (const q of queries) {
             if (!checkBudget()) break;
@@ -796,18 +814,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             try {
               const searchRes = await searchImages({ query: q });
               const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
-              const totalImages = images.length;
 
               for (const img of images) {
                 if (!checkBudget()) break;
-                totalImagesProcessed++;
 
                 try {
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
-                    await emit("image_result", `[${totalImagesProcessed}/${totalImages}] Collage - ${visual.reason}`, {
-                      imageIndex: totalImagesProcessed,
-                      totalImages,
+                    await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
                       reason: visual.reason,
@@ -815,6 +829,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     continue;
                   }
 
+                  validImageIndex++;
                   state.budgets.rekognitionCallsUsed++;
                   const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
@@ -823,9 +838,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                      await emit("image_result", `[${totalImagesProcessed}/${totalImages}] ✓ Evidence - ${candidateName} & ${personB}`, {
-                        imageIndex: totalImagesProcessed,
-                        totalImages,
+                      await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${candidateName} & ${personB}`, {
+                        imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "evidence",
                         celebrities: celebs,
@@ -853,9 +867,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           imageScore: aiVerification.overallConfidence,
                         };
                         evidence.push(aiRecord);
-                        await emit("image_result", `[${totalImagesProcessed}/${totalImages}] ✓ AI Evidence - ${candidateName} & ${personB}`, {
-                          imageIndex: totalImagesProcessed,
-                          totalImages,
+                        await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${candidateName} & ${personB}`, {
+                          imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
                           status: "evidence",
                           celebrities: [
@@ -865,18 +878,16 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           aiVerified: true,
                         });
                       } else {
-                        await emit("image_result", `[${totalImagesProcessed}/${totalImages}] No target match`, {
-                          imageIndex: totalImagesProcessed,
-                          totalImages,
+                        await emit("image_result", `[${validImageIndex}] No match`, {
+                          imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
                           status: "no_match",
                           celebrities: celebs,
                         });
                       }
                     } catch (aiError) {
-                      await emit("image_result", `[${totalImagesProcessed}/${totalImages}] No target match`, {
-                        imageIndex: totalImagesProcessed,
-                        totalImages,
+                      await emit("image_result", `[${validImageIndex}] No match`, {
+                        imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "no_match",
                         celebrities: celebs,
@@ -884,9 +895,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
-                  await emit("image_result", `[${totalImagesProcessed}/${totalImages}] Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
-                    imageIndex: totalImagesProcessed,
-                    totalImages,
+                  await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",
                     reason: imgError instanceof Error ? imgError.message : String(imgError),
@@ -916,6 +925,21 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             },
           });
 
+          // Persist edge to social graph database
+          try {
+            await upsertEdge(
+              this.env.GRAPH_DB,
+              candidateName,
+              personB,
+              bridgeEdge.edgeConfidence,
+              bridgeEdge.bestEvidence.imageUrl,
+              bridgeEdge.bestEvidence.thumbnailUrl,
+              bridgeEdge.bestEvidence.contextUrl
+            );
+          } catch (dbError) {
+            console.error("Failed to persist edge to graph DB:", dbError);
+          }
+
           await completeStep("connect_target", true, `Connection to ${personB} verified!`);
 
           await emit("path_update", `Path complete: ${state.path.join(" → ")}`, {
@@ -925,7 +949,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
           const result = this.finalizeSuccess(state);
           const confidence = calculatePathConfidence(state.verifiedEdges);
-          await emit("final", `Investigation complete! Found ${state.path.length - 1}-hop connection with ${confidence.pathBottleneck}% confidence.`, {
+          await emit("final", `Investigation complete! Found ${state.path.length - 1}-hop connection with ${Math.round(confidence.pathBottleneck)}% confidence.`, {
             result: result.status === "success" ? result.result : undefined,
           });
 

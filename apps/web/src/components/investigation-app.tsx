@@ -1,12 +1,20 @@
 "use client"
 
 import { useRef, useState, useCallback } from "react"
+import dynamic from "next/dynamic"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Search, ArrowRight, Loader2, RotateCcw, Square } from "lucide-react"
+import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, PanelRightOpen, Expand } from "lucide-react"
 import { parseQuery } from "@/lib/query-parser"
 import { InvestigationTracker } from "@/components/investigation/investigation-tracker"
+
+// Dynamic import for SocialGraph (requires DOM)
+const SocialGraph = dynamic(
+  () => import("@/components/social-graph").then((mod) => mod.SocialGraph),
+  { ssr: false }
+)
 import type {
   InvestigationState,
   InvestigationEvent,
@@ -20,7 +28,9 @@ import {
   startInvestigation,
   createEventPoller,
   parseQueryWithAI,
-  InvestigationEvent as WorkerEvent
+  findCachedPath,
+  InvestigationEvent as WorkerEvent,
+  CachedPathResult
 } from "@/lib/api-client"
 
 /**
@@ -305,11 +315,46 @@ export function InvestigationApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [investigationState, setInvestigationState] = useState<InvestigationState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showGraph, setShowGraph] = useState(true)
+  const [graphWidth, setGraphWidth] = useState(400)
+  const [isResizing, setIsResizing] = useState(false)
   const stopPollingRef = useRef<(() => void) | null>(null)
+  const [cachedPath, setCachedPath] = useState<CachedPathResult | null>(null)
+  const [graphStats, setGraphStats] = useState({ nodes: 0, edges: 0 })
 
-  const runInvestigation = useCallback(async (personA: string, personB: string) => {
+  // Handle resize drag
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+
+    const startX = e.clientX
+    const startWidth = graphWidth
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = startX - e.clientX
+      const newWidth = Math.min(Math.max(startWidth + delta, 250), 800)
+      setGraphWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [graphWidth])
+
+  // Run a fresh investigation (no cache)
+  const runFreshInvestigation = useCallback(async (personA: string, personB: string) => {
     const initialState = createInitialState(personA, personB);
     setInvestigationState(initialState);
+    setCachedPath(null);
     setError(null);
 
     try {
@@ -365,6 +410,67 @@ export function InvestigationApp() {
       setIsLoading(false);
     }
   }, []);
+
+  // Main investigation function - checks cache first
+  const runInvestigation = useCallback(async (personA: string, personB: string) => {
+    setError(null);
+    setCachedPath(null);
+
+    try {
+      // First, check if we have a cached path
+      const cached = await findCachedPath(personA, personB);
+
+      if (cached.found) {
+        // Found a cached path - show it immediately
+        setCachedPath(cached);
+
+        // Create a state that shows the cached result
+        const cachedState = createInitialState(personA, personB);
+        cachedState.status = "completed";
+        cachedState.currentPath = cached.path;
+
+        // Build the path array (hop-by-hop with confidence) that FinalPath expects
+        cachedState.path = cached.steps.map((step) => ({
+          from: step.fromName,
+          to: step.toName,
+          confidence: step.confidence,
+        }));
+
+        // Add evidence from cached steps
+        cachedState.evidence = cached.steps.map((step, index) => ({
+          id: `cached-${index}`,
+          from: step.fromName,
+          to: step.toName,
+          confidence: step.confidence,
+          thumbnailUrl: step.thumbnailUrl || "",
+          sourceUrl: step.contextUrl || "",
+          description: `${step.fromName} photographed with ${step.toName}`,
+        }));
+
+        // Add a log entry for the cached result
+        cachedState.logs = [{
+          type: "final",
+          message: `Found cached ${cached.hops}-hop connection with ${Math.round(cached.minConfidence)}% confidence`,
+          timestamp: Date.now(),
+          data: {
+            path: cached.path,
+            hopDepth: cached.hops,
+          }
+        }];
+
+        setInvestigationState(cachedState);
+        setIsLoading(false);
+        return;
+      }
+
+      // No cached path found - run fresh investigation
+      runFreshInvestigation(personA, personB);
+    } catch (err) {
+      console.warn("Cache lookup failed, running fresh investigation:", err);
+      // If cache lookup fails, just run the investigation
+      runFreshInvestigation(personA, personB);
+    }
+  }, [runFreshInvestigation]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -429,6 +535,7 @@ export function InvestigationApp() {
       stopPollingRef.current = null;
     }
     setInvestigationState(null);
+    setCachedPath(null);
     setQuery("");
     setError(null);
     setIsLoading(false);
@@ -444,6 +551,13 @@ export function InvestigationApp() {
               <Search className="size-4 text-primary" />
             </div>
             <h1 className="text-lg font-semibold tracking-tight">Visual Degrees</h1>
+            <div className="h-5 w-px bg-border ml-2" />
+            <Link href="/graph">
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+                <Network className="size-4" />
+                Graph
+              </Button>
+            </Link>
           </div>
 
           {/* Search bar in header when investigation is active */}
@@ -452,7 +566,7 @@ export function InvestigationApp() {
               <div className="relative">
                 <Input
                   type="text"
-                  placeholder="New search..."
+                  placeholder="e.g., Sarkodie and Obama together"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="h-9 pr-10 rounded-lg bg-muted/50 text-sm"
@@ -506,7 +620,7 @@ export function InvestigationApp() {
       <main className="flex-1 overflow-hidden">
         {!investigationState ? (
           /* Search Form - Centered when no investigation */
-          <div className="h-full flex flex-col items-center justify-center px-4">
+          <div className="h-full flex flex-col items-center justify-center px-4 pb-24">
             <div className="w-full max-w-xl space-y-8">
               <div className="text-center space-y-2">
                 <h2 className="text-3xl font-bold tracking-tight">Who is connected to who?</h2>
@@ -519,7 +633,7 @@ export function InvestigationApp() {
                 <div className="relative">
                   <Input
                     type="text"
-                    placeholder="e.g., Elon Musk to Beyonce"
+                    placeholder="e.g., Sarkodie and Obama together"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     className={cn(
@@ -574,12 +688,99 @@ export function InvestigationApp() {
             </div>
           </div>
         ) : (
-          /* Investigation View - Full viewport */
-          <div className="h-full overflow-auto">
-            {error && (
-              <p className="text-sm text-destructive px-6 pt-4">{error}</p>
+          /* Investigation View - Split layout */
+          <div className="h-full flex">
+            {/* Left panel - Investigation tracker */}
+            <div className={cn(
+              "h-full overflow-auto transition-all duration-300",
+              showGraph ? "flex-1" : "w-full"
+            )}>
+              {error && (
+                <p className="text-sm text-destructive px-6 pt-4">{error}</p>
+              )}
+              <InvestigationTracker
+                state={investigationState}
+                className="p-6"
+                onSearchDeeper={cachedPath ? () => {
+                  setIsLoading(true);
+                  runFreshInvestigation(investigationState.query.personA, investigationState.query.personB);
+                } : undefined}
+              />
+            </div>
+
+            {/* Right panel - Live graph */}
+            {showGraph && (
+              <>
+                {/* Resize handle */}
+                <div
+                  className={cn(
+                    "w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 cursor-col-resize transition-all shrink-0 relative group",
+                    isResizing && "w-1.5 bg-primary/30"
+                  )}
+                  onMouseDown={handleResizeStart}
+                >
+                  <div className={cn(
+                    "absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border group-hover:bg-primary/40 transition-colors",
+                    isResizing && "bg-primary/50"
+                  )} />
+                </div>
+
+                <div
+                  className="border-l bg-zinc-50 flex flex-col shrink-0"
+                  style={{ width: graphWidth }}
+                >
+                  {/* Graph header */}
+                  <div className="px-3 py-2 border-b bg-white flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Network className="size-4 text-primary shrink-0" />
+                      <span className="text-sm font-medium truncate">Live Graph</span>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {graphStats.nodes} people, {graphStats.edges} connections
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Link href="/graph" target="_blank">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Open full graph"
+                        >
+                          <Expand className="size-4" />
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setShowGraph(false)}
+                        title="Hide graph"
+                      >
+                        <PanelRightClose className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Graph visualization */}
+                  <div className="flex-1 min-h-0">
+                    <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
+                  </div>
+                </div>
+              </>
             )}
-            <InvestigationTracker state={investigationState} className="p-6" />
+
+            {/* Toggle button when graph is hidden */}
+            {!showGraph && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="fixed bottom-4 right-4 gap-2 shadow-lg"
+                onClick={() => setShowGraph(true)}
+              >
+                <PanelRightOpen className="size-4" />
+                Show Graph
+              </Button>
+            )}
           </div>
         )}
       </main>

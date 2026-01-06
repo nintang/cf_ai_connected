@@ -8,7 +8,6 @@ import {
   Circle,
   ImageIcon,
   ArrowRight,
-  ChevronDown,
   Minus,
   Maximize2,
   RefreshCw,
@@ -24,7 +23,6 @@ import { useState, useEffect } from "react";
 
 // shadcn components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface InvestigationTrackerProps {
@@ -280,8 +278,8 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
   );
 }
 
-// Step item
-function StepItem({ step, value }: { step: InvestigationStep; value: string }) {
+// Step item - always expanded, no accordion behavior
+function StepItem({ step }: { step: InvestigationStep }) {
   // Filter out error image events - don't show or count them
   const visibleEvents = step.events.filter(event => {
     if (event.type === "image_result") {
@@ -294,53 +292,46 @@ function StepItem({ step, value }: { step: InvestigationStep; value: string }) {
   const hasDetails = visibleEvents.length > 0;
 
   return (
-    <AccordionItem value={value} className="border-b border-foreground/8 last:border-0">
-      <AccordionTrigger className="py-3 hover:no-underline hover:bg-foreground/[0.02] px-3 -mx-3 rounded-md gap-3 [&[data-state=open]>svg]:rotate-180">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <StatusIcon status={step.status} />
-          <div className="text-left flex-1 min-w-0">
-            <span className={cn(
-              "text-sm",
-              step.status === "pending" && "text-foreground/40",
-              step.status === "running" && "text-foreground",
-              step.status === "done" && "text-foreground",
-              step.status === "failed" && "text-foreground/50"
-            )}>
-              {step.title}
-            </span>
-            {step.message && (
-              <p className="text-xs text-foreground/50 mt-0.5 truncate">{step.message}</p>
-            )}
-          </div>
+    <div className="border-b border-foreground/8 last:border-0 py-3">
+      {/* Step header */}
+      <div className="flex items-center gap-3">
+        <StatusIcon status={step.status} />
+        <div className="text-left flex-1 min-w-0">
+          <span className={cn(
+            "text-sm",
+            step.status === "pending" && "text-foreground/40",
+            step.status === "running" && "text-foreground",
+            step.status === "done" && "text-foreground",
+            step.status === "failed" && "text-foreground/50"
+          )}>
+            {step.title}
+          </span>
+          {step.message && (
+            <p className="text-xs text-foreground/50 mt-0.5">{step.message}</p>
+          )}
         </div>
-        {hasDetails && <ChevronDown size={14} className="text-foreground/30 shrink-0 transition-transform" />}
-      </AccordionTrigger>
+      </div>
 
+      {/* Step details - always visible */}
       {hasDetails && (
-        <AccordionContent className="pb-3">
-          <div className="ml-7 space-y-2 border-l border-foreground/8 pl-4 overflow-hidden">
-            {visibleEvents.map((event, idx) => (
-              <div key={idx}>
-                {event.type === "image_result" ? (
-                  <ImageResult event={event} />
-                ) : (
-                  <StepEvent event={event} />
-                )}
-              </div>
-            ))}
-          </div>
-        </AccordionContent>
+        <div className="mt-3 ml-7 space-y-2 border-l border-foreground/8 pl-4 overflow-hidden">
+          {visibleEvents.map((event, idx) => (
+            <div key={idx}>
+              {event.type === "image_result" ? (
+                <ImageResult event={event} />
+              ) : (
+                <StepEvent event={event} />
+              )}
+            </div>
+          ))}
+        </div>
       )}
-    </AccordionItem>
+    </div>
   );
 }
 
-// Segment detail
+// Segment detail - no accordion, everything expanded
 function SegmentDetail({ segment }: { segment: InvestigationSegment }) {
-  const defaultOpen = segment.steps
-    .filter(s => s.status === "running")
-    .map((_, idx) => `step-${idx}`);
-
   return (
     <div className="space-y-3 sm:space-y-5 overflow-hidden">
       {/* Segment header */}
@@ -353,13 +344,13 @@ function SegmentDetail({ segment }: { segment: InvestigationSegment }) {
         <StatusLabel status={segment.status} />
       </div>
 
-      {/* Steps */}
+      {/* Steps - always expanded */}
       {segment.steps.length > 0 && (
-        <Accordion type="multiple" defaultValue={defaultOpen} className="w-full overflow-hidden">
+        <div className="w-full overflow-hidden">
           {segment.steps.map((step, idx) => (
-            <StepItem key={`${step.id}-${idx}`} step={step} value={`step-${idx}`} />
+            <StepItem key={`${step.id}-${idx}`} step={step} />
           ))}
-        </Accordion>
+        </div>
       )}
     </div>
   );
@@ -400,6 +391,107 @@ function CurrentPath({ path, target }: { path: string[]; target: string }) {
   );
 }
 
+// Evidence card with mobile-friendly tap behavior
+function EvidenceCard({ hop, evidence, isIntermediary }: {
+  hop: { from: string; to: string; confidence: number };
+  evidence: EvidenceItem | undefined;
+  isIntermediary: boolean;
+}) {
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const handleImageClick = (e: React.MouseEvent) => {
+    // On mobile (touch devices), show preview first
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      e.preventDefault();
+      setIsPreviewOpen(true);
+    }
+    // On desktop, the link works normally
+  };
+
+  const handleOpenSource = () => {
+    if (evidence?.sourceUrl) {
+      window.open(evidence.sourceUrl, '_blank');
+    } else if (evidence?.thumbnailUrl) {
+      window.open(evidence.thumbnailUrl, '_blank');
+    }
+  };
+
+  return (
+    <>
+      <div
+        className={cn(
+          "flex items-center gap-1.5 sm:gap-2 rounded-lg border p-1.5 sm:p-2 transition-colors",
+          isIntermediary
+            ? "border-foreground/15 bg-foreground/[0.02]"
+            : "border-foreground/20 bg-foreground/[0.03]"
+        )}
+      >
+        {evidence?.thumbnailUrl ? (
+          <a
+            href={evidence.sourceUrl || evidence.thumbnailUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={handleImageClick}
+            className="relative shrink-0 overflow-hidden rounded-md hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            <img
+              src={evidence.thumbnailUrl}
+              alt={`${hop.from} with ${hop.to}`}
+              className="size-10 sm:size-12 object-cover"
+            />
+            <div className="absolute bottom-0.5 right-0.5 rounded bg-foreground/80 p-0.5">
+              <Check size={8} className="text-background" strokeWidth={3} />
+            </div>
+          </a>
+        ) : (
+          <div className="flex size-10 sm:size-12 items-center justify-center rounded-md bg-foreground/5 shrink-0">
+            <ImageIcon size={14} className="text-foreground/30 sm:size-[16px]" />
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1 text-[10px] sm:text-xs font-medium">
+            <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.from.split(' ').pop()}</span>
+            <ArrowRight size={8} className="text-foreground/40 shrink-0 sm:size-[10px]" />
+            <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.to.split(' ').pop()}</span>
+          </div>
+          <div className="text-[9px] sm:text-[10px] text-foreground/50 mt-0.5">
+            {Math.ceil(hop.confidence)}% match
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile preview dialog - tap image to open source */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-sm p-3 sm:max-w-lg">
+          <DialogTitle className="text-sm font-medium mb-2">
+            {hop.from} & {hop.to}
+          </DialogTitle>
+          {evidence?.thumbnailUrl && (
+            <button
+              onClick={handleOpenSource}
+              className="relative w-full overflow-hidden rounded-lg cursor-pointer group"
+            >
+              <img
+                src={evidence.thumbnailUrl}
+                alt={`${hop.from} with ${hop.to}`}
+                className="w-full h-auto max-h-[60vh] object-contain"
+              />
+              <div className="absolute inset-0 bg-black/0 group-active:bg-black/10 transition-colors flex items-center justify-center">
+                <span className="text-xs text-white bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                  Tap to open source
+                </span>
+              </div>
+            </button>
+          )}
+          <p className="text-xs text-muted-foreground text-center mt-2">
+            {Math.ceil(hop.confidence)}% confidence • Tap image to view source
+          </p>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // Final path with evidence photos
 function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evidence: EvidenceItem[] }) {
   if (path.length === 0) return null;
@@ -437,54 +529,14 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
       {/* Evidence photos for each hop */}
       {path.length > 0 && (
         <div className="flex flex-wrap gap-2 sm:gap-3 pt-1 sm:pt-2">
-          {path.map((hop, idx) => {
-            const hopEvidence = getEvidenceForHop(hop.from, hop.to);
-            const isIntermediary = idx > 0 && idx < path.length - 1;
-
-            return (
-              <div
-                key={idx}
-                className={cn(
-                  "flex items-center gap-1.5 sm:gap-2 rounded-lg border p-1.5 sm:p-2 transition-colors",
-                  isIntermediary
-                    ? "border-foreground/15 bg-foreground/[0.02]"
-                    : "border-foreground/20 bg-foreground/[0.03]"
-                )}
-              >
-                {hopEvidence?.thumbnailUrl ? (
-                  <a
-                    href={hopEvidence.sourceUrl || hopEvidence.thumbnailUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative shrink-0 overflow-hidden rounded-md hover:opacity-90 transition-opacity"
-                  >
-                    <img
-                      src={hopEvidence.thumbnailUrl}
-                      alt={`${hop.from} with ${hop.to}`}
-                      className="size-10 sm:size-12 object-cover"
-                    />
-                    <div className="absolute bottom-0.5 right-0.5 rounded bg-foreground/80 p-0.5">
-                      <Check size={8} className="text-background" strokeWidth={3} />
-                    </div>
-                  </a>
-                ) : (
-                  <div className="flex size-10 sm:size-12 items-center justify-center rounded-md bg-foreground/5 shrink-0">
-                    <ImageIcon size={14} className="text-foreground/30 sm:size-[16px]" />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1 text-[10px] sm:text-xs font-medium">
-                    <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.from.split(' ').pop()}</span>
-                    <ArrowRight size={8} className="text-foreground/40 shrink-0 sm:size-[10px]" />
-                    <span className="truncate max-w-[50px] sm:max-w-[60px]">{hop.to.split(' ').pop()}</span>
-                  </div>
-                  <div className="text-[9px] sm:text-[10px] text-foreground/50 mt-0.5">
-                    {Math.ceil(hop.confidence)}% match
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {path.map((hop, idx) => (
+            <EvidenceCard
+              key={idx}
+              hop={hop}
+              evidence={getEvidenceForHop(hop.from, hop.to)}
+              isIntermediary={idx > 0 && idx < path.length - 1}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -524,7 +576,6 @@ export function InvestigationTracker({
 
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [userSelectedTab, setUserSelectedTab] = useState(false);
-  const [showSegmentDetails, setShowSegmentDetails] = useState(false);
 
   // Only auto-switch tabs if user hasn't manually selected one
   useEffect(() => {
@@ -542,7 +593,6 @@ export function InvestigationTracker({
   const handleTabChange = (segmentId: string) => {
     setUserSelectedTab(true);
     setActiveSegmentId(segmentId);
-    setShowSegmentDetails(true); // On mobile, show details when selecting
   };
 
   const hasSegments = state.segments.length > 0;
@@ -673,7 +723,7 @@ export function InvestigationTracker({
               </CardContent>
             </Card>
           ) : !hasSegments && state.steps.length > 0 ? (
-            /* Legacy steps */
+            /* Legacy steps - no accordion */
             <Card className="rounded-lg sm:rounded-xl border shadow-sm">
               <CardHeader className="pb-2 px-3 sm:px-6">
                 <CardTitle className="text-[9px] sm:text-xs text-foreground/40 uppercase tracking-wide">
@@ -681,14 +731,11 @@ export function InvestigationTracker({
                 </CardTitle>
               </CardHeader>
               <CardContent className="pb-3 sm:pb-4 px-3 sm:px-6">
-                <Accordion
-                  type="multiple"
-                  defaultValue={state.steps.filter(s => s.status === "running").map((_, i) => `legacy-step-${i}`)}
-                >
+                <div>
                   {state.steps.map((step, idx) => (
-                    <StepItem key={`${step.id}-${idx}`} step={step} value={`legacy-step-${idx}`} />
+                    <StepItem key={`${step.id}-${idx}`} step={step} />
                   ))}
-                </Accordion>
+                </div>
               </CardContent>
             </Card>
           ) : isCompleted ? (
@@ -697,14 +744,23 @@ export function InvestigationTracker({
               <CardContent className="pt-4 sm:pt-5 pb-4 sm:pb-5 px-3 sm:px-6">
                 <div className="text-center text-foreground/50">
                   <Check size={20} className="mx-auto mb-2 text-foreground sm:size-[24px]" />
-                  <p className="text-xs sm:text-sm">Connection found from cached data</p>
+                  <p className="text-xs sm:text-sm">
+                    {state.path.length > 6
+                      ? `Found a ${state.path.length}-degree connection from cached data`
+                      : "Connection found from cached data"}
+                  </p>
+                  {state.path.length > 6 && (
+                    <p className="text-xs text-foreground/40 mt-1">
+                      This is longer than 6 degrees. A fresh search might find a shorter path.
+                    </p>
+                  )}
                   {onSearchDeeper && (
                     <button
                       onClick={onSearchDeeper}
                       className="mt-2 sm:mt-3 inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-primary hover:text-primary/80 bg-primary/10 hover:bg-primary/15 rounded-md transition-colors"
                     >
                       <RefreshCw size={12} />
-                      Run fresh investigation
+                      {state.path.length > 6 ? "Search for shorter path" : "Run fresh investigation"}
                     </button>
                   )}
                 </div>

@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, PanelRightOpen, Expand, Menu, X } from "lucide-react"
+import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, Expand, Menu, X } from "lucide-react"
 import { parseQuery } from "@/lib/query-parser"
 import { InvestigationTracker } from "@/components/investigation/investigation-tracker"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -830,7 +830,7 @@ export function InvestigationApp() {
 
                   {/* Graph visualization */}
                   <div className="flex-1 min-h-0">
-                    <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
+                    <SocialGraph className="h-full" compact onStatsChange={setGraphStats} autoRefresh={isLoading} />
                   </div>
                 </div>
               </>
@@ -873,7 +873,7 @@ export function InvestigationApp() {
 
                 {/* Graph visualization - mobile */}
                 <div className="flex-1 min-h-0 bg-zinc-50">
-                  <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
+                  <SocialGraph className="h-full" compact onStatsChange={setGraphStats} autoRefresh={isLoading} />
                 </div>
               </div>
             )}

@@ -32,9 +32,13 @@ interface SocialGraphProps {
   className?: string;
   compact?: boolean;
   onStatsChange?: (stats: { nodes: number; edges: number }) => void;
+  /** When true, the graph will auto-refresh every few seconds to pick up new edges */
+  autoRefresh?: boolean;
+  /** Auto-refresh interval in milliseconds (default: 3000) */
+  autoRefreshInterval?: number;
 }
 
-export function SocialGraph({ className, compact = false, onStatsChange }: SocialGraphProps) {
+export function SocialGraph({ className, compact = false, onStatsChange, autoRefresh = false, autoRefreshInterval = 3000 }: SocialGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const graphRef = useRef<Graph | null>(null);
@@ -290,6 +294,19 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
       }
     };
   }, [loadGraph]);
+
+  // Auto-refresh when enabled (e.g., during investigation)
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    const intervalId = setInterval(() => {
+      loadGraph();
+    }, autoRefreshInterval);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [autoRefresh, autoRefreshInterval, loadGraph]);
 
   // Zoom controls
   const handleZoomIn = () => {

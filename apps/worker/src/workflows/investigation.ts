@@ -589,10 +589,19 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         continue;
       }
 
-      // Filter candidates to those not yet tried
-      const candidatesToTry = plan.nextCandidates.filter(
-        name => !globalTriedCandidates.has(name.toLowerCase())
-      );
+      // Use ALL available candidates, not just LLM-selected ones
+      // This ensures we try more people if the first few fail
+      // Sort by: LLM-selected first (in order), then remaining by confidence
+      const llmSelectedSet = new Set(plan.nextCandidates.map(n => n.toLowerCase()));
+      const candidatesToTry = [
+        // First: LLM-selected candidates in order
+        ...plan.nextCandidates.filter(name => !globalTriedCandidates.has(name.toLowerCase())),
+        // Then: remaining candidates sorted by confidence
+        ...availableCandidates
+          .filter(c => !llmSelectedSet.has(c.name.toLowerCase()) && !globalTriedCandidates.has(c.name.toLowerCase()))
+          .sort((a, b) => b.bestCoappearConfidence - a.bestCoappearConfidence)
+          .map(c => c.name)
+      ];
 
       if (candidatesToTry.length === 0) {
         await completeStep("find_bridges", false, "All candidates already explored");
@@ -602,7 +611,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       }
 
       // Complete find_bridges step - we have candidates to try
-      await completeStep("find_bridges", true, `Will try: ${candidatesToTry.slice(0, 3).join(", ")}`);
+      await completeStep("find_bridges", true, `Will try ${candidatesToTry.length} candidate(s): ${candidatesToTry.slice(0, 3).join(", ")}${candidatesToTry.length > 3 ? '...' : ''}`);
 
       // Try candidates one by one (DFS style)
       let foundValidEdge = false;
@@ -741,6 +750,16 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (!edgeToCandidate) {
           state.failedCandidates.push(candidateName);
           await completeStep("verify_bridge", false, `Could not verify ${currentFrontier} ↔ ${candidateName}`);
+
+          // Show which candidate we're trying next (if any remain)
+          const remainingCandidates = candidatesToTry.slice(i + 1).filter(
+            name => !globalTriedCandidates.has(name.toLowerCase())
+          );
+          if (remainingCandidates.length > 0) {
+            await emit("thinking", `${candidateName} didn't work. Trying next candidate: ${remainingCandidates[0]} (${remainingCandidates.length} remaining)`);
+          } else {
+            await emit("thinking", `${candidateName} didn't work. No more candidates at this level.`);
+          }
           continue;
         }
 

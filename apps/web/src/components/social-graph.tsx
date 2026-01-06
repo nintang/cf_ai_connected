@@ -5,7 +5,7 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import { circular } from "graphology-layout";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import { fetchGraph, type GraphData } from "@/lib/api-client";
+import { fetchGraph } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Loader2, ExternalLink, Search, X } from "lucide-react";

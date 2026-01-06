@@ -23,3 +23,9 @@ Thumbs.db
 npm-debug.log*
 
 .wrangler
+
+
+apps/web/.next
+
+
+apps/web/.open-next

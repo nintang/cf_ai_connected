@@ -73,8 +73,8 @@ export interface InvestigationEvent {
     progressPct?: number;
     hop?: number;
     frontier?: string;
-    budget?: any;
-    result?: any;
+    budget?: Record<string, unknown>;
+    result?: Record<string, unknown>;
     category?: string;
     from?: string;
     to?: string;

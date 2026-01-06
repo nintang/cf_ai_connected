@@ -166,7 +166,7 @@ function mapWorkerEventsToState(
   _personB: string,
   currentState: InvestigationState
 ): InvestigationState {
-  let state = {
+  const state = {
     ...currentState,
     steps: [...currentState.steps],
     segments: [...currentState.segments],

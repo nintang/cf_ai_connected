@@ -1,6 +1,13 @@
 import { Ai } from "@cloudflare/workers-types";
 import { PlannerInput, PlannerOutput } from "@visual-degrees/contracts";
 
+interface BridgeCandidateSuggestion {
+  name: string;
+  reasoning: string;
+  connectionToA: string;
+  connectionToB: string;
+}
+
 export class WorkersAIPlannerClient {
   private static readonly PLANNER_SYSTEM_PROMPT = `You are a planning assistant for a visual evidence pipeline that finds visual connections between public figures.
 
@@ -27,6 +34,67 @@ NARRATION EXAMPLES (use this style):
 `;
 
   constructor(private ai: Ai, private modelId: string = "@cf/meta/llama-3.3-70b-instruct-fp8-fast") {}
+
+  /**
+   * Suggest bridge candidates using LLM world knowledge (names only, no percentages)
+   * @param personA - First person to connect from
+   * @param personB - Target person to connect to
+   * @param exclude - Optional list of names to exclude (already tried)
+   */
+  async suggestBridgeCandidates(
+    personA: string,
+    personB: string,
+    exclude?: string[]
+  ): Promise<BridgeCandidateSuggestion[]> {
+    const excludeClause = exclude && exclude.length > 0
+      ? `\n\nIMPORTANT: Do NOT suggest any of these people (already tried): ${exclude.join(", ")}`
+      : "";
+
+    const prompt = `Suggest real bridge candidates who might have been photographed with BOTH people.
+Return strict JSON:
+{
+  "bridgeCandidates": [
+    { "name": "Person", "reasoning": "Why they connect both", "connectionToA": "short", "connectionToB": "short" }
+  ]
+}
+No percentages. No extra text.${excludeClause}`;
+
+    try {
+      const response = await this.ai.run(this.modelId as any, {
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: `Person A: ${personA}\nPerson B: ${personB}` },
+        ],
+      });
+
+      // @ts-ignore - response type from Ai.run is generic
+      const text = response?.message?.content?.[0]?.text || "";
+      const match = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+      if (!match) {
+        console.warn("Workers AI bridge suggestion returned no JSON");
+        return [];
+      }
+
+      const parsed = JSON.parse(match[0]);
+      if (!Array.isArray(parsed.bridgeCandidates)) return [];
+
+      return parsed.bridgeCandidates
+        .map((bc: any) => ({
+          name: String(bc.name ?? "").trim(),
+          reasoning: String(bc.reasoning ?? "").trim(),
+          connectionToA: String(bc.connectionToA ?? "").trim(),
+          connectionToB: String(bc.connectionToB ?? "").trim(),
+        }))
+        .filter((bc: BridgeCandidateSuggestion) => bc.name.length > 0)
+        .slice(0, 6);
+    } catch (error) {
+      console.warn(
+        "Workers AI bridge suggestion failed:",
+        error instanceof Error ? error.message : error
+      );
+      return [];
+    }
+  }
 
   async selectNextExpansion(input: PlannerInput): Promise<PlannerOutput> {
     const userPayload = {

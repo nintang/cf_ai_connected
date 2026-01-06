@@ -54,6 +54,8 @@ export class GooglePSEClient {
       q: query,
       searchType: "image",
       num: String(this.numResults),
+      // Restrict to JPEG/PNG for best API compatibility
+      fileType: "jpg,png",
     });
 
     const url = `${GooglePSEClient.BASE_URL}?${params.toString()}`;
@@ -76,6 +78,36 @@ export class GooglePSEClient {
   }
 
   /**
+   * Check if URL looks like a valid image URL
+   */
+  private isValidImageUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname.toLowerCase();
+
+      // Must be http/https
+      if (!parsed.protocol.startsWith("http")) {
+        return false;
+      }
+
+      // Check for image extensions
+      if (path.match(/\.(jpe?g|png|gif|webp)$/i)) {
+        return true;
+      }
+
+      // Allow URLs without extension (could be dynamic image endpoints)
+      // But skip obvious non-image paths
+      if (path.match(/\.(html?|php|aspx?|jsp|json|xml|css|js|pdf|svg)$/i)) {
+        return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Parse raw Google API response into typed ImageSearchResult[]
    * Skips results missing imageUrl or contextUrl as per constraints
    */
@@ -92,6 +124,11 @@ export class GooglePSEClient {
       const contextUrl = item.image?.contextLink;
 
       if (!imageUrl || !contextUrl) {
+        continue;
+      }
+
+      // Skip URLs that don't look like valid images
+      if (!this.isValidImageUrl(imageUrl)) {
         continue;
       }
 

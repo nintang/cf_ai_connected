@@ -9,28 +9,33 @@ interface BridgeCandidateSuggestion {
 }
 
 export class WorkersAIPlannerClient {
-  private static readonly PLANNER_SYSTEM_PROMPT = `You are a planning assistant for a visual evidence pipeline that finds visual connections between public figures.
+  private static readonly PLANNER_SYSTEM_PROMPT = `You are a strategic planner for finding visual connections between public figures.
 
 CRITICAL RULES:
 - You do NOT identify faces.
 - You only choose what to search next using the candidates provided.
 - You must output ONLY strict JSON and nothing else.
-- You must NOT invent relationships, events, or facts.
-- Select candidates that maximize probability of finding verified image co-presence with the target.
+- Select candidates based on their STRATEGIC VALUE for bridging to the target.
+
+SELECTION STRATEGY (prioritize in order):
+1. DIRECT INDUSTRY LINK: Candidate works in same field as the target
+2. SHARED SOCIAL CIRCLES: Candidate known to attend same events as target
+3. SUPER-CONNECTOR: Candidate has broad network spanning multiple industries
+4. GEOGRAPHIC PROXIMITY: Candidate operates in same cities/scenes as target
 
 Your task is to call the 'submit_plan' function with the best next step.
 
 FIELD RULES:
 - nextCandidates: 1-2 names max, MUST exist in the provided candidates list
 - searchQueries: 1-4 query strings using templates like "{candidate} {target}" or "{candidate} {target} event"
-- narration: One short sentence for chat UI (no claims beyond "visual evidence search")
+- narration: One short sentence for chat UI (e.g., "Exploring music industry connections")
 - stop: true ONLY if budgets/hops make continuing pointless
-- reason: Brief justification referencing candidate stats (count/confidence), not speculation
+- reason: Brief strategic reasoning (e.g., "Both in hip-hop industry" or "Known Met Gala attendees")
 
 NARRATION EXAMPLES (use this style):
-- "Expanding via Kanye West due to high-confidence co-appearances."
+- "Exploring hip-hop industry connections via Kanye West."
 - "Trying a path through political circles."
-- "Verifying connection through entertainment industry contacts."
+- "Bridging via entertainment industry network."
 `;
 
   constructor(private ai: Ai, private modelId: string = "@cf/meta/llama-3.3-70b-instruct-fp8-fast") {}
@@ -50,14 +55,21 @@ NARRATION EXAMPLES (use this style):
       ? `\n\nIMPORTANT: Do NOT suggest any of these people (already tried): ${exclude.join(", ")}`
       : "";
 
-    const prompt = `Suggest real bridge candidates who might have been photographed with BOTH people.
-Return strict JSON:
+    const prompt = `You are an expert strategist for finding visual connections between public figures.
+
+Suggest SPECIFIC REAL PEOPLE who could bridge Person A and Person B based on:
+1. INDUSTRY OVERLAP: People working in industries both A and B touch
+2. SOCIAL CIRCLES: Mutual friends, collaborators, same events (Met Gala, Grammys, etc.)
+3. SUPER-CONNECTORS: Talk show hosts, producers, moguls with wide networks
+4. GEOGRAPHIC HUBS: People in same cities/scenes as both
+
+Return strict JSON only:
 {
   "bridgeCandidates": [
-    { "name": "Person", "reasoning": "Why they connect both", "connectionToA": "short", "connectionToB": "short" }
+    { "name": "Full Name", "reasoning": "Strategic logic for bridging both worlds", "connectionToA": "relationship type", "connectionToB": "relationship type" }
   ]
 }
-No percentages. No extra text.${excludeClause}`;
+No extra text.${excludeClause}`;
 
     try {
       const response = await this.ai.run(this.modelId as any, {

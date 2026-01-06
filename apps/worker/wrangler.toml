@@ -1,6 +1,6 @@
 name = "visual-degrees-worker"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -8,6 +8,13 @@ AWS_REGION = "us-east-1"
 
 [ai]
 binding = "AI"
+
+# KV namespace for storing investigation events (for streaming to UI)
+# Using same ID for both to ensure Workflows write to same namespace in dev mode
+[[kv_namespaces]]
+binding = "INVESTIGATION_EVENTS"
+id = "58df6c4dedab42529ecf698fcd812220"
+preview_id = "58df6c4dedab42529ecf698fcd812220"
 
 [[workflows]]
 name = "investigation"

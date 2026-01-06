@@ -59,6 +59,7 @@ export type InvestigationEventType =
   | "research"
   | "strategy"
   | "thinking"
+  | "backtrack"
   | "error";
 
 export interface InvestigationEvent {
@@ -103,6 +104,20 @@ export interface BridgeCandidateSuggestion {
   connectionToA: string;
   connectionToB: string;
   confidence: number;
+}
+
+/**
+ * DFS Stack Frame - represents a level in the search tree
+ */
+export interface DFSStackFrame {
+  /** The person we're exploring from at this level */
+  frontier: string;
+  /** All candidates available at this level */
+  candidates: Candidate[];
+  /** Index of the candidate we chose to explore */
+  candidateIndex: number;
+  /** The verified edge that got us to this candidate (null for root) */
+  edge: VerifiedEdge | null;
 }
 
 // ============================================================================
@@ -218,7 +233,19 @@ export class InvestigationOrchestrator {
   }
 
   /**
-   * Main entry point: Run a full investigation
+   * DFS Stack Frame - tracks state at each level of exploration
+   */
+  private createStackFrame(
+    frontier: string,
+    candidates: Candidate[],
+    candidateIndex: number,
+    edge: VerifiedEdge | null
+  ): DFSStackFrame {
+    return { frontier, candidates, candidateIndex, edge };
+  }
+
+  /**
+   * Main entry point: Run a full investigation using DFS with backtracking
    */
   async runInvestigation(
     personA: string,
@@ -234,9 +261,9 @@ export class InvestigationOrchestrator {
       verifiedEdges: [],
       failedCandidates: [],
       budgets: {
-        maxSearchCalls: 20,
-        maxRekognitionCalls: 100,
-        maxLLMCalls: 15,
+        maxSearchCalls: 30,
+        maxRekognitionCalls: 150,
+        maxLLMCalls: 20,
         searchCallsUsed: 0,
         rekognitionCallsUsed: 0,
         llmCallsUsed: 0,
@@ -257,84 +284,203 @@ export class InvestigationOrchestrator {
       return this.finalizeSuccess(state, directResult);
     }
 
-    // Main expansion loop
-    while (state.status === "running" && state.hopDepth < this.config.hopLimit) {
+    // DFS Stack - each frame represents a level in the search tree
+    // Frame contains: frontier person, candidates to try, current candidate index, edge that got us here
+    const dfsStack: DFSStackFrame[] = [];
+    
+    // Global set of all tried candidates (to avoid cycles)
+    const globalTriedCandidates = new Set<string>([personA.toLowerCase()]);
+
+    // Start DFS from personA
+    let currentFrontier = personA;
+
+    // Main DFS loop
+    while (state.status === "running") {
       // Check budgets
       if (this.isBudgetExhausted(state.budgets)) {
         this.emit("status", "Budget exhausted");
         break;
       }
 
-      // S2: Discover candidates from current frontier
-      const candidates = await this.discoverCandidates(state);
-
-      if (candidates.length === 0) {
-        this.emit("status", "No viable candidates found from frontier");
-        break;
+      // Check hop limit
+      if (dfsStack.length >= this.config.hopLimit) {
+        this.emit("thinking", `Reached hop limit (${this.config.hopLimit}), backtracking...`);
+        // Backtrack
+        if (!this.backtrack(state, dfsStack, globalTriedCandidates)) {
+          break; // No more options
+        }
+        currentFrontier = state.frontier;
+        continue;
       }
 
-      // S3: LLM selects next candidate(s)
-      const plannerResult = await this.selectNextCandidate(state, candidates);
+      // S2: Discover candidates from current frontier
+      this.emit("thinking", `Exploring from: ${currentFrontier}`);
+      const candidates = await this.discoverCandidates(state);
+
+      // Filter out already tried candidates
+      const availableCandidates = candidates.filter(
+        c => !globalTriedCandidates.has(c.name.toLowerCase())
+      );
+
+      if (availableCandidates.length === 0) {
+        this.emit("thinking", `No viable candidates found for ${currentFrontier}. Stopping search.`);
+        // Backtrack
+        if (!this.backtrack(state, dfsStack, globalTriedCandidates)) {
+          break; // No more options
+        }
+        currentFrontier = state.frontier;
+        continue;
+      }
+
+      // S3: LLM ranks candidates
+      const plannerResult = await this.selectNextCandidate(state, availableCandidates);
 
       if (plannerResult.stop || plannerResult.nextCandidates.length === 0) {
         this.emit("status", plannerResult.narration);
-        break;
+        // Backtrack
+        if (!this.backtrack(state, dfsStack, globalTriedCandidates)) {
+          break;
+        }
+        currentFrontier = state.frontier;
+        continue;
       }
 
-      // Try each candidate
-      let foundPath = false;
-      for (const candidateName of plannerResult.nextCandidates) {
+      // Create a stack frame for this level with all candidates to try
+      const candidatesToTry = plannerResult.nextCandidates.filter(
+        name => !globalTriedCandidates.has(name.toLowerCase())
+      );
+
+      if (candidatesToTry.length === 0) {
+        // All suggested candidates already tried
+        if (!this.backtrack(state, dfsStack, globalTriedCandidates)) {
+          break;
+        }
+        currentFrontier = state.frontier;
+        continue;
+      }
+
+      // Try candidates one by one (DFS style)
+      let foundValidEdge = false;
+      for (let i = 0; i < candidatesToTry.length; i++) {
+        const candidateName = candidatesToTry[i];
+        
+        // Mark as tried globally
+        globalTriedCandidates.add(candidateName.toLowerCase());
+
         // S4: Verify edge from frontier to candidate
         const edgeToCandidate = await this.verifyEdge(
           state,
-          state.frontier,
+          currentFrontier,
           candidateName
         );
 
         if (!edgeToCandidate) {
-          state.failedCandidates.push(candidateName);
           this.emit("status", `Could not verify edge to ${candidateName}`);
           continue;
         }
 
-        // Edge verified! Update state
+        // Edge verified! Push frame to stack
+        const frame: DFSStackFrame = {
+          frontier: currentFrontier,
+          candidates: candidatesToTry.map(name => ({ 
+            name, 
+            bestCoappearConfidence: 0, 
+            coappearCount: 0, 
+            evidenceContextUrls: [] 
+          })),
+          candidateIndex: i,
+          edge: edgeToCandidate,
+        };
+        dfsStack.push(frame);
+
+        // Update state
         state.verifiedEdges.push(edgeToCandidate);
         state.path.push(candidateName);
-        state.hopDepth++;
+        state.hopDepth = dfsStack.length;
+        state.frontier = candidateName;
 
-        this.emit("evidence", `Verified: ${state.frontier} ↔ ${candidateName}`, {
+        this.emit("evidence", `Verified: ${currentFrontier} ↔ ${candidateName}`, {
           edge: edgeToCandidate,
         });
         this.emit("path_update", `Path: ${state.path.join(" → ")}`, {
           path: state.path,
+          hopDepth: state.hopDepth,
         });
 
         // S5: Try to bridge to target
         const bridgeEdge = await this.attemptBridgeToTarget(state, candidateName);
 
         if (bridgeEdge) {
-          // Success! We found a path
+          // Success! We found a path to the target
           state.verifiedEdges.push(bridgeEdge);
           state.path.push(personB);
           return this.finalizeSuccess(state);
         }
 
-        // No direct bridge, continue expansion from new frontier
-        state.frontier = candidateName;
-        state.failedCandidates = []; // Reset failed candidates for new frontier
-        foundPath = true;
-        break;
+        // No direct bridge to target, continue DFS from this candidate
+        currentFrontier = candidateName;
+        foundValidEdge = true;
+        break; // Break to continue DFS from new frontier
       }
 
-      if (!foundPath) {
-        // All candidates for this frontier failed
-        this.emit("status", "All candidates failed for current frontier");
-        break;
+      if (!foundValidEdge) {
+        // All candidates at this level failed verification
+        this.emit("thinking", `All candidates from ${currentFrontier} failed verification`);
+        // Backtrack
+        if (!this.backtrack(state, dfsStack, globalTriedCandidates)) {
+          break;
+        }
+        currentFrontier = state.frontier;
       }
     }
 
     // S7: Finalize failure
     return this.finalizeFailure(state);
+  }
+
+  /**
+   * Backtrack one level in the DFS
+   * Returns true if backtracking was possible, false if stack is empty
+   */
+  private backtrack(
+    state: InvestigationState,
+    dfsStack: DFSStackFrame[],
+    globalTriedCandidates: Set<string>
+  ): boolean {
+    if (dfsStack.length === 0) {
+      this.emit("thinking", "Search exhausted - no more paths to explore");
+      return false;
+    }
+
+    // Pop the current frame
+    const poppedFrame = dfsStack.pop()!;
+    
+    // Restore state
+    state.path.pop(); // Remove the candidate we're backtracking from
+    state.verifiedEdges.pop(); // Remove the edge
+    state.hopDepth = dfsStack.length;
+    
+    // Determine new frontier
+    if (dfsStack.length === 0) {
+      state.frontier = state.personA;
+    } else {
+      // The frontier is the candidate from the previous frame
+      const prevFrame = dfsStack[dfsStack.length - 1];
+      state.frontier = prevFrame.candidates[prevFrame.candidateIndex].name;
+    }
+
+    this.emit("backtrack", `Backtracking from ${poppedFrame.candidates[poppedFrame.candidateIndex]?.name || 'unknown'} to ${state.frontier}`, {
+      from: poppedFrame.candidates[poppedFrame.candidateIndex]?.name,
+      to: state.frontier,
+      remainingDepth: dfsStack.length,
+    });
+
+    this.emit("path_update", `Path: ${state.path.join(" → ")}`, {
+      path: state.path,
+      hopDepth: state.hopDepth,
+    });
+
+    return true;
   }
 
   /**

@@ -16,13 +16,11 @@ import {
 } from "@visual-degrees/contracts";
 import {
   directQuery,
-  discoveryQueries,
   verificationQueries,
   bridgeQueries,
   isValidEvidence,
   createEvidenceRecord,
   createVerifiedEdge,
-  aggregateCandidates,
   calculatePathConfidence
 } from "@visual-degrees/core";
 
@@ -464,68 +462,40 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         continue;
       }
 
-      // Step 2: Discover Candidates
-      await emit("research", `Discovering candidates connected to ${currentFrontier}`, {
-        query: `${currentFrontier} celebrity photos`,
-      });
+      // Step 2: Get AI-suggested bridge candidates
+      // Use initial suggestions at first level, or request new ones for deeper levels
+      let currentBridges = dfsStack.length === 0 ? suggestedBridges : [];
 
-      const candidates = await step.do(`discover-${dfsStack.length}-${currentFrontier}`, async () => {
-        const queries = discoveryQueries(currentFrontier);
-        const analyses = [];
+      // If no suggestions yet for this frontier, ask AI
+      if (currentBridges.length === 0 && checkBudget()) {
+        await emit("thinking", `Asking AI for bridge candidates from ${currentFrontier} to ${personB}...`);
 
-        for (const q of queries) {
-          if (!checkBudget()) break;
-          state.budgets.searchCallsUsed++;
-          
-          try {
-            const searchRes = await searchImages({ query: q });
-            const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
+        const excludeList = Array.from(globalTriedCandidates);
+        currentBridges = await step.do(`bridges-${dfsStack.length}-${currentFrontier}`, async () => {
+          state.budgets.llmCallsUsed++;
+          return await planner.suggestBridgeCandidates(currentFrontier, personB, excludeList);
+        });
 
-            for (const img of images) {
-              if (!checkBudget()) break;
-              
-              try {
-                const visual = await verifyCopresence({ imageUrl: img.imageUrl });
-                if (!visual.isValidScene) continue;
-
-                state.budgets.rekognitionCallsUsed++;
-                const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
-                analyses.push({ analysis, contextUrl: img.contextUrl });
-              } catch (imgError) {
-                console.warn(`Failed to process discovery image ${img.imageUrl}:`, imgError);
-                continue;
-              }
-            }
-          } catch (e) {
-            console.error("Discovery search failed", e);
-          }
+        if (currentBridges.length > 0) {
+          await updateStep(`AI suggested ${currentBridges.length} bridge candidates`, {
+            candidates: currentBridges.map((c) => ({
+              name: c.name,
+              score: c.confidence,
+              reasoning: c.reasoning,
+            })),
+          });
         }
-
-        return aggregateCandidates(analyses, currentFrontier, state.path, DEFAULT_CONFIG.confidenceThreshold);
-      });
-
-      // Merge LLM-suggested bridges (only at first level)
-      const mergedCandidates = dfsStack.length === 0 ? [
-        ...candidates,
-        ...suggestedBridges
-          .filter(
-            (s) =>
-              !candidates.some(
-                (c) => c.name.toLowerCase() === s.name.toLowerCase()
-              )
-          )
-          .map((s) => ({
-            name: s.name,
-            coappearCount: 1,
-            bestCoappearConfidence: 90,
-            evidenceContextUrls: [],
-          })),
-      ] : candidates;
+      }
 
       // Filter out already tried candidates
-      let availableCandidates = mergedCandidates.filter(
-        c => !globalTriedCandidates.has(c.name.toLowerCase())
-      );
+      let availableCandidates = currentBridges
+        .filter((s) => !globalTriedCandidates.has(s.name.toLowerCase()))
+        .map((s) => ({
+          name: s.name,
+          coappearCount: 1,
+          bestCoappearConfidence: s.confidence ?? 80,
+          evidenceContextUrls: [],
+        }));
 
       // If no candidates available, ask LLM for more suggestions
       if (availableCandidates.length === 0 && checkBudget()) {
@@ -534,7 +504,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         const excludeList = Array.from(globalTriedCandidates);
         const additionalBridges = await step.do(`additional-bridges-${dfsStack.length}-${currentFrontier}`, async () => {
           state.budgets.llmCallsUsed++;
-          // Ask for suggestions excluding already tried candidates
           return await planner.suggestBridgeCandidates(currentFrontier, personB, excludeList);
         });
 
@@ -556,7 +525,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           availableCandidates = newCandidates.map((s) => ({
             name: s.name,
             coappearCount: 1,
-            bestCoappearConfidence: s.confidence,
+            bestCoappearConfidence: s.confidence ?? 80,
             evidenceContextUrls: [],
           }));
         }

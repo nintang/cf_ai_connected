@@ -16,6 +16,61 @@ export function normalizeName(name: string): string {
 }
 
 /**
+ * Known celebrity aliases - maps aliases to canonical names
+ * This helps match "Ye" to "Kanye West", "P. Diddy" to "Sean Combs", etc.
+ */
+const CELEBRITY_ALIASES: Record<string, string[]> = {
+  "kanye west": ["ye", "kanye"],
+  "sean combs": ["p. diddy", "puff daddy", "diddy", "puffy"],
+  "dwayne johnson": ["the rock", "rock"],
+  "stefani germanotta": ["lady gaga", "gaga"],
+  "marshall mathers": ["eminem", "slim shady"],
+  "curtis jackson": ["50 cent", "50cent", "fiddy"],
+  "shawn carter": ["jay-z", "jay z", "jayz", "hov", "hova"],
+  "beyoncé knowles": ["beyonce", "beyoncé", "queen bey"],
+  "robyn fenty": ["rihanna", "riri"],
+  "onika maraj": ["nicki minaj", "nicki"],
+  "aubrey graham": ["drake", "drizzy", "champagnepapi"],
+  "abel tesfaye": ["the weeknd", "weeknd"],
+  "calvin broadus": ["snoop dogg", "snoop", "snoop lion"],
+  "william adams": ["will.i.am", "william"],
+  "cordozar broadus": ["snoop dogg", "snoop"],
+  "belcalis almanzar": ["cardi b", "cardi"],
+  "melissa jefferson": ["lizzo"],
+  "donald glover": ["childish gambino", "gambino"],
+  "o'shea jackson": ["ice cube", "cube"],
+  "andre young": ["dr. dre", "dr dre", "dre"],
+  "alicia cook": ["alicia keys", "keys"],
+  "prince rogers nelson": ["prince"],
+  "michael jackson": ["mj", "king of pop"],
+  "elvis presley": ["elvis", "the king"],
+  "reginald dwight": ["elton john", "elton"],
+  "farrokh bulsara": ["freddie mercury", "freddie"],
+  "paul hewson": ["bono"],
+  "david bowie": ["ziggy stardust", "bowie"],
+};
+
+/**
+ * Check if two names might be aliases of the same person
+ */
+function areAliases(name1: string, name2: string): boolean {
+  const n1 = normalizeName(name1);
+  const n2 = normalizeName(name2);
+
+  // Check if both names map to the same canonical name
+  for (const [canonical, aliases] of Object.entries(CELEBRITY_ALIASES)) {
+    const allNames = [canonical, ...aliases];
+    const n1Match = allNames.some(a => n1.includes(a) || a.includes(n1));
+    const n2Match = allNames.some(a => n2.includes(a) || a.includes(n2));
+    if (n1Match && n2Match) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Extract the last word (surname) from a name
  */
 export function extractSurname(name: string): string {
@@ -34,9 +89,10 @@ export function extractFirstName(name: string): string {
 /**
  * Check if two names match using flexible matching:
  * 1. Exact match (after normalization)
- * 2. Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
- * 3. One contains the other (e.g., "Donald Trump" contains "Trump")
- * 4. Surname + first name match (e.g., "Donald Trump" vs "Donald J. Trump")
+ * 2. Known celebrity aliases (e.g., "Kanye West" vs "Ye")
+ * 3. Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
+ * 4. One contains the other (e.g., "Donald Trump" contains "Trump")
+ * 5. Surname + first name match (e.g., "Donald Trump" vs "Donald J. Trump")
  */
 export function namesMatch(name1: string, name2: string): boolean {
   const n1 = normalizeName(name1);
@@ -44,6 +100,9 @@ export function namesMatch(name1: string, name2: string): boolean {
 
   // Exact match
   if (n1 === n2) return true;
+
+  // Known celebrity aliases (e.g., "Kanye West" vs "Ye")
+  if (areAliases(name1, name2)) return true;
 
   // Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
   const parts1 = n1.split(" ");

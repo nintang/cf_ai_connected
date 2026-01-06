@@ -104,14 +104,19 @@ Rules:
 - togetherInScene = true only if both are found AND appear in the same real scene (not a composite)
 - overallConfidence = your confidence that both people are genuinely together in this photo`;
 
-  private static readonly PLANNER_SYSTEM_PROMPT = `You are a planning assistant for a visual evidence pipeline that finds visual connections between public figures.
+  private static readonly PLANNER_SYSTEM_PROMPT = `You are a strategic planner for finding visual connections between public figures.
 
 CRITICAL RULES:
 - You do NOT identify faces.
 - You only choose what to search next using the candidates provided.
 - You must output ONLY strict JSON and nothing else.
-- You must NOT invent relationships, events, or facts.
-- Select candidates that maximize probability of finding verified image co-presence with the target.
+- Select candidates based on their STRATEGIC VALUE for bridging to the target.
+
+SELECTION STRATEGY (prioritize in order):
+1. DIRECT INDUSTRY LINK: Candidate works in same field as the target
+2. SHARED SOCIAL CIRCLES: Candidate known to attend same events as target
+3. SUPER-CONNECTOR: Candidate has broad network spanning multiple industries
+4. GEOGRAPHIC PROXIMITY: Candidate operates in same cities/scenes as target
 
 Your output MUST be a valid JSON object with this exact structure:
 {
@@ -119,15 +124,15 @@ Your output MUST be a valid JSON object with this exact structure:
   "searchQueries": ["query1", "query2"],
   "narration": "Short status message for the user",
   "stop": false,
-  "reason": "Brief justification based on candidate stats"
+  "reason": "Brief strategic justification"
 }
 
 FIELD RULES:
 - nextCandidates: 1-2 names max, MUST exist in the provided candidates list
 - searchQueries: 1-4 query strings using templates like "{candidate} {target}" or "{candidate} {target} event"
-- narration: One short sentence for chat UI (no claims beyond "visual evidence search")
+- narration: One short sentence for chat UI (e.g., "Exploring music industry connections" or "Trying entertainment network path")
 - stop: true ONLY if budgets/hops make continuing pointless
-- reason: Brief justification referencing candidate stats (count/confidence), not speculation`;
+- reason: Brief strategic reasoning (e.g., "Both in hip-hop industry" or "Known Met Gala attendees")`;
 
   private static readonly QUERY_PARSER_PROMPT = `You are a query parser that extracts two person names from natural language queries about finding connections between people.
 
@@ -164,40 +169,51 @@ Rules:
 - If only one person is mentioned, isValid = false
 - If query isn't about connecting people, isValid = false`;
 
-  private static readonly BRIDGE_CANDIDATES_PROMPT = `You are an expert on celebrity connections and public figure appearances.
+  private static readonly BRIDGE_CANDIDATES_PROMPT = `You are an expert strategist for finding visual connections between public figures.
 
-TASK: Suggest SPECIFIC REAL PEOPLE who might bridge Person A and Person B.
+TASK: Suggest SPECIFIC REAL PEOPLE who could serve as "bridges" between Person A and Person B.
 
-Think about:
-1. Who has Person A been PUBLICLY PHOTOGRAPHED with?
-2. Who has Person B been PUBLICLY PHOTOGRAPHED with?
-3. Which people appear in BOTH circles?
+SELECTION CRITERIA (in order of importance):
+1. INDUSTRY OVERLAP: People who work in industries that BOTH Person A and B touch
+   - Example: A music producer who works with both rappers and pop stars
+   - Example: A TV host who interviews both politicians and entertainers
 
-Focus on:
-- Known public appearances, events, collaborations
-- Talk show appearances (hosts interview many people)
-- Award shows, galas, political events
-- Music collaborations, film premieres, sports events
-- Business meetings, charity events
+2. SOCIAL CIRCLE INTERSECTIONS: People known to be friends, collaborators, or associates of BOTH
+   - Same management, label, agency, production company
+   - Known friendships or professional relationships with both
+
+3. EVENT ATTENDANCE: People who frequent events both Person A and B would attend
+   - Award shows (Grammys, Oscars, Met Gala, etc.)
+   - Charity galas, political fundraisers
+   - Fashion weeks, premieres, sports events
+
+4. GEOGRAPHIC/CULTURAL HUBS: People embedded in locations or scenes both frequent
+   - NYC/LA social scenes, specific clubs or venues
+   - Cultural movements, artistic communities
+
+5. SUPER-CONNECTORS: High-profile individuals known for bridging different worlds
+   - Talk show hosts (interview diverse guests)
+   - Music producers, DJs, promoters
+   - Moguls, philanthropists with wide networks
 
 IMPORTANT:
-- Suggest REAL SPECIFIC NAMES, not categories
-- These should be people likely to have been photographed with BOTH A and B
-- Prioritize high-profile people (more likely to have photos)
-- Include your reasoning for each suggestion
+- Suggest REAL SPECIFIC NAMES with clear reasoning
+- Higher confidence = stronger connection logic to BOTH people
+- Prioritize people who are HIGH-PROFILE (more likely to have public photos)
+- Think about WHO would realistically be at events with BOTH people
 
 Output ONLY valid JSON:
 {
   "bridgeCandidates": [
     {
       "name": "Full Name",
-      "reasoning": "Why this person might connect A and B",
-      "connectionToA": "How they're connected to Person A",
-      "connectionToB": "How they're connected to Person B",
+      "reasoning": "Strategic logic for why this person bridges both worlds",
+      "connectionToA": "Specific connection type (colleague, friend, same industry, etc.)",
+      "connectionToB": "Specific connection type",
       "confidence": 0-100
     }
   ],
-  "summary": "Brief explanation of the connection strategy",
+  "summary": "Brief strategy explanation",
   "searchQueries": ["specific search queries to find photos"]
 }`;
 

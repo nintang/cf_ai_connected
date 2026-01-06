@@ -2,6 +2,7 @@ import { Env } from "../env";
 import { searchImages } from "./search";
 import { detectCelebrities } from "./detect";
 import { verifyCopresence } from "./verify";
+import { verifyCelebritiesWithAI } from "./verify-celebrities";
 
 export const getTools = (env: Env) => [
   {
@@ -39,5 +40,19 @@ export const getTools = (env: Env) => [
       required: ["imageUrl"],
     },
     function: verifyCopresence(env),
+  },
+  {
+    name: "verify_celebrities_ai",
+    description: "AI-based celebrity verification - use when Rekognition fails",
+    parameters: {
+      type: "object",
+      properties: {
+        imageUrl: { type: "string", description: "Image URL to analyze" },
+        personA: { type: "string", description: "First person to look for" },
+        personB: { type: "string", description: "Second person to look for" },
+      },
+      required: ["imageUrl", "personA", "personB"],
+    },
+    function: verifyCelebritiesWithAI(env),
   },
 ];

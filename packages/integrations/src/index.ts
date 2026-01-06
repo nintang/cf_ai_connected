@@ -30,3 +30,14 @@ export type {
 // Workers AI Planner
 export { WorkersAIPlannerClient } from "./workers-ai/client.js";
 
+// OpenRouter (Gemini 3 Flash via OpenRouter)
+export {
+  OpenRouterClient,
+  createOpenRouterClient,
+} from "./openrouter/client.js";
+export type {
+  OpenRouterConfig,
+  VisualVerificationResult as OpenRouterVisualResult,
+  BridgeCandidateSuggestion as OpenRouterBridgeSuggestion,
+} from "./openrouter/client.js";
+

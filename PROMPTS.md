@@ -52,3 +52,8 @@ update our contex tor the necesaary part of our context for this
   15. @query-templates.ts (1-44) 
 
 it shoudn't be strict as this, i mean ev4nt, award, celebrities, the agent or ai should generat ethe top ones based on the particular frontieer
+16. i want you to implement a basic chat interface from prompt kit. do not connect it to an ai first, i just want to see it as our frontend
+
+@Prompt Kit 
+
+every component you used should be installed, not created yoru self

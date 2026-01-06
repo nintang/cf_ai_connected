@@ -202,8 +202,8 @@ export interface InvestigationBudgets {
 }
 
 export const DEFAULT_BUDGETS: InvestigationBudgets = {
-  maxSearchCalls: 15,
-  maxRekognitionCalls: 75,
+  maxSearchCalls: 100,
+  maxRekognitionCalls: 200,
   maxLLMCalls: 10,
   searchCallsUsed: 0,
   rekognitionCallsUsed: 0,
@@ -320,3 +320,124 @@ export type InvestigationResult =
   | { status: "success"; result: VerifiedPath; disclaimer: string }
   | { status: "no_path"; personA: string; personB: string; message: string };
 
+// ============================================================================
+// Streaming Event Types (for Chain-of-Thought UI)
+// ============================================================================
+
+/**
+ * All possible event types emitted during an investigation
+ */
+export type InvestigationEventType =
+  // Phase markers for clear UI progression
+  | "step_start"         // Starting a new step
+  | "step_update"        // Progress update within a step
+  | "step_complete"      // Step completed
+  // Detail events (nested within steps)
+  | "research"           // Starting a search query
+  | "thinking"           // LLM reasoning/thoughts
+  | "strategy"           // Initial strategy decision
+  | "strategy_update"    // Strategy updated based on findings
+  | "candidate_discovery"// Found candidate bridges
+  | "llm_selection"      // LLM selected next candidates
+  | "image_result"       // Per-image analysis result
+  | "evidence"           // Verified edge found
+  | "path_update"        // Path has changed
+  | "backtrack"          // DFS backtracking to try another path
+  | "status"             // General status update
+  | "final"              // Investigation completed successfully
+  | "no_path"            // Investigation completed with no path
+  | "error";             // Error occurred
+
+/**
+ * Step identifiers for the investigation workflow
+ */
+export type InvestigationStepId =
+  | "direct_check"       // Step 1: Check for direct connection
+  | "find_bridges"       // Step 2: Find bridge candidates
+  | "verify_bridge"      // Step 3: Verify connection to bridge candidate
+  | "connect_target";    // Step 4: Connect bridge to target
+
+/**
+ * Step status
+ */
+export type StepStatus = "pending" | "running" | "done" | "failed" | "skipped";
+
+/**
+ * A streaming event emitted during investigation
+ */
+export interface InvestigationEvent {
+  /** Event type */
+  type: InvestigationEventType;
+  /** Unique run identifier */
+  runId: string;
+  /** ISO-8601 timestamp */
+  timestamp: string;
+  /** Human-readable message */
+  message: string;
+  /** Event-specific data */
+  data?: {
+    // Unique event identifier for deduplication
+    eventId?: string;
+    // For step events (step_start, step_update, step_complete)
+    stepId?: InvestigationStepId;
+    stepNumber?: number;
+    stepTitle?: string;
+    stepStatus?: StepStatus;
+    // For verify_bridge / connect_target steps - who we're connecting
+    fromPerson?: string;
+    toPerson?: string;
+    // For research events
+    query?: string;
+    // For thinking events
+    reasoning?: string;
+    // For candidate_discovery / llm_selection
+    candidates?: Array<{ name: string; score?: number; coappearCount?: number; reasoning?: string }>;
+    // For image_result events
+    imageIndex?: number;
+    totalImages?: number;
+    imageUrl?: string;
+    status?: "collage" | "no_match" | "evidence" | "error";
+    reason?: string;
+    celebrities?: Array<{ name: string; confidence: number }>;
+    // For evidence events
+    edge?: {
+      from: string;
+      to: string;
+      confidence: number;
+      thumbnailUrl?: string;
+      contextUrl?: string;
+    };
+    // For path_update events
+    path?: string[];
+    hopDepth?: number;
+    // For strategy_update events
+    confirmedBridge?: string;
+    progressPct?: number;
+    // For status events
+    hop?: number;
+    frontier?: string;
+    budget?: InvestigationBudgets;
+    // For backtrack events
+    from?: string;
+    to?: string;
+    remainingDepth?: number;
+    // For final events
+    result?: VerifiedPath;
+    // For error events
+    category?: "INTEGRATION_ERROR" | "TIMEOUT" | "VALIDATION_ERROR" | "UNKNOWN";
+  };
+}
+
+/**
+ * Response from the events polling endpoint
+ */
+export interface EventsResponse {
+  /** Run ID */
+  runId: string;
+  /** All events (or events after cursor) */
+  events: InvestigationEvent[];
+  /** Whether the investigation is complete */
+  complete: boolean;
+  /** Cursor for next poll (timestamp of last event) */
+  cursor?: string;
+}

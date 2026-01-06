@@ -23,7 +23,6 @@ import { useState, useEffect } from "react";
 
 // shadcn components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
@@ -145,11 +144,11 @@ function StepEvent({ event }: { event: { type: string; message: string; data?: R
   const isAISuggestion = event.message.toLowerCase().includes("ai suggested");
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 overflow-hidden">
       <div className="flex items-start gap-2 text-sm text-foreground/50">
-        <span className="text-foreground/30 mt-0.5">›</span>
-        <div className="flex-1">
-          <span>{event.message}</span>
+        <span className="text-foreground/30 mt-0.5 shrink-0">›</span>
+        <div className="flex-1 min-w-0">
+          <span className="break-words">{event.message}</span>
           {query && (
             <span className="ml-1.5 text-foreground/30 text-xs">
               ({query})
@@ -167,7 +166,7 @@ function StepEvent({ event }: { event: { type: string; message: string; data?: R
         </div>
       )}
       {reasoning && (
-        <div className="ml-5 text-xs text-foreground/40 italic">
+        <div className="ml-5 text-xs text-foreground/40 italic break-words">
           {reasoning}
         </div>
       )}
@@ -179,6 +178,10 @@ function StepEvent({ event }: { event: { type: string; message: string; data?: R
 function ImageResult({ event }: { event: { type: string; message: string; data?: Record<string, unknown> } }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const status = event.data?.status as string;
+
+  // Don't render errored images
+  if (status === "error") return null;
+
   const imageUrl = event.data?.imageUrl as string;
   const celebrities = event.data?.celebrities as Array<{ name: string; confidence: number }> | undefined;
   const reason = event.data?.reason as string | undefined;
@@ -277,14 +280,23 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
 
 // Step item
 function StepItem({ step, value }: { step: InvestigationStep; value: string }) {
-  const hasDetails = step.events.length > 0;
+  // Filter out error image events - don't show or count them
+  const visibleEvents = step.events.filter(event => {
+    if (event.type === "image_result") {
+      const status = (event.data as Record<string, unknown>)?.status as string;
+      return status !== "error";
+    }
+    return true;
+  });
+
+  const hasDetails = visibleEvents.length > 0;
 
   return (
     <AccordionItem value={value} className="border-b border-foreground/8 last:border-0">
       <AccordionTrigger className="py-3 hover:no-underline hover:bg-foreground/[0.02] px-3 -mx-3 rounded-md gap-3 [&[data-state=open]>svg]:rotate-180">
-        <div className="flex items-center gap-3 flex-1">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
           <StatusIcon status={step.status} />
-          <div className="text-left flex-1">
+          <div className="text-left flex-1 min-w-0">
             <span className={cn(
               "text-sm",
               step.status === "pending" && "text-foreground/40",
@@ -295,7 +307,7 @@ function StepItem({ step, value }: { step: InvestigationStep; value: string }) {
               {step.title}
             </span>
             {step.message && (
-              <p className="text-xs text-foreground/50 mt-0.5">{step.message}</p>
+              <p className="text-xs text-foreground/50 mt-0.5 truncate">{step.message}</p>
             )}
           </div>
         </div>
@@ -304,8 +316,8 @@ function StepItem({ step, value }: { step: InvestigationStep; value: string }) {
 
       {hasDetails && (
         <AccordionContent className="pb-3">
-          <div className="ml-7 space-y-2 border-l border-foreground/8 pl-4">
-            {step.events.map((event, idx) => (
+          <div className="ml-7 space-y-2 border-l border-foreground/8 pl-4 overflow-hidden">
+            {visibleEvents.map((event, idx) => (
               <div key={idx}>
                 {event.type === "image_result" ? (
                   <ImageResult event={event} />
@@ -328,20 +340,20 @@ function SegmentDetail({ segment }: { segment: InvestigationSegment }) {
     .map((_, idx) => `step-${idx}`);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 overflow-hidden">
       {/* Segment header */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <span className="text-sm font-medium">{segment.from}</span>
-          <ArrowRight size={14} className="text-foreground/30" />
-          <span className="text-sm font-medium">{segment.to}</span>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="text-sm font-medium truncate">{segment.from}</span>
+          <ArrowRight size={14} className="text-foreground/30 shrink-0" />
+          <span className="text-sm font-medium truncate">{segment.to}</span>
         </div>
         <StatusLabel status={segment.status} />
       </div>
 
       {/* Steps */}
       {segment.steps.length > 0 && (
-        <Accordion type="multiple" defaultValue={defaultOpen} className="w-full">
+        <Accordion type="multiple" defaultValue={defaultOpen} className="w-full overflow-hidden">
           {segment.steps.map((step, idx) => (
             <StepItem key={`${step.id}-${idx}`} step={step} value={`step-${idx}`} />
           ))}
@@ -465,7 +477,7 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
                     <span className="truncate max-w-[60px]">{hop.to.split(' ').pop()}</span>
                   </div>
                   <div className="text-[10px] text-foreground/50 mt-0.5">
-                    {hop.confidence}% match
+                    {Math.ceil(hop.confidence)}% match
                   </div>
                 </div>
               </div>
@@ -529,140 +541,160 @@ export function InvestigationTracker({
   };
 
   const hasSegments = state.segments.length > 0;
+  const activeSegment = hasSegments ? state.segments.find(s => s.id === activeSegmentId) : null;
 
   return (
-    <div className={cn("w-full max-w-2xl space-y-3", className)}>
-      {/* Header */}
-      <Card className={cn(
-        "rounded-xl border py-0 shadow-sm",
-        isCompleted && "border-foreground/30"
-      )}>
-        <CardHeader className="pb-3 pt-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                {isRunning && <Loader2 size={16} className="text-foreground/60 animate-spin" />}
-                {isCompleted && (
-                  <div className="flex items-center justify-center rounded bg-foreground p-0.5">
-                    <Check size={12} className="text-background" strokeWidth={3} />
+    <div className={cn("w-full h-full", className)}>
+      {/* Two-column layout for wider screens */}
+      <div className="flex flex-col lg:flex-row gap-6 h-full">
+        {/* Left column - Status and Path */}
+        <div className="lg:w-[400px] xl:w-[480px] shrink-0 space-y-4">
+          {/* Header Card */}
+          <Card className={cn(
+            "rounded-xl border py-0 shadow-sm",
+            isCompleted && "border-foreground/30"
+          )}>
+            <CardHeader className="pb-3 pt-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {isRunning && <Loader2 size={16} className="text-foreground/60 animate-spin" />}
+                    {isCompleted && (
+                      <div className="flex items-center justify-center rounded bg-foreground p-0.5">
+                        <Check size={12} className="text-background" strokeWidth={3} />
+                      </div>
+                    )}
+                    {isFailed && (
+                      <div className="flex items-center justify-center rounded border border-foreground/30 p-0.5">
+                        <X size={12} className="text-foreground/50" strokeWidth={2.5} />
+                      </div>
+                    )}
+
+                    <CardTitle className="text-base font-semibold">
+                      {isRunning && "Investigating"}
+                      {isCompleted && "Connection Found"}
+                      {isFailed && "No Connection"}
+                    </CardTitle>
                   </div>
-                )}
-                {isFailed && (
-                  <div className="flex items-center justify-center rounded border border-foreground/30 p-0.5">
-                    <X size={12} className="text-foreground/50" strokeWidth={2.5} />
-                  </div>
-                )}
 
-                <CardTitle className="text-base font-semibold">
-                  {isRunning && "Investigating"}
-                  {isCompleted && "Connection Found"}
-                  {isFailed && "No Connection"}
-                </CardTitle>
-              </div>
-
-              <CardDescription className="text-sm">
-                {state.query.personA}
-                <span className="mx-1.5 text-foreground/30">→</span>
-                {state.query.personB}
-              </CardDescription>
-            </div>
-
-            {hasSegments && (
-              <div className="text-right">
-                <div className="text-2xl font-semibold tabular-nums tracking-tight">
-                  {state.segments.filter((s) => s.status === "success").length}
-                  <span className="text-foreground/20 mx-0.5">/</span>
-                  <span className="text-foreground/50">{state.segments.length}</span>
+                  <CardDescription className="text-sm">
+                    {state.query.personA}
+                    <span className="mx-1.5 text-foreground/30">→</span>
+                    {state.query.personB}
+                  </CardDescription>
                 </div>
-                <div className="text-[10px] text-foreground/40 uppercase tracking-wide">segments</div>
-              </div>
-            )}
-          </div>
 
+                {hasSegments && (
+                  <div className="text-right">
+                    <div className="text-2xl font-semibold tabular-nums tracking-tight">
+                      {state.segments.filter((s) => s.status === "success").length}
+                      <span className="text-foreground/20 mx-0.5">/</span>
+                      <span className="text-foreground/50">{state.segments.length}</span>
+                    </div>
+                    <div className="text-[10px] text-foreground/40 uppercase tracking-wide">segments</div>
+                  </div>
+                )}
+              </div>
+
+              {hasSegments && (
+                <div className="pt-3">
+                  <ProgressBar segments={state.segments} />
+                </div>
+              )}
+            </CardHeader>
+
+            {isRunning && state.currentPath.length > 0 && (
+              <CardContent className="pt-0 pb-4 border-t border-dashed border-foreground/8">
+                <div className="text-[10px] text-foreground/40 uppercase tracking-wide mb-2 pt-3">
+                  Exploring
+                </div>
+                <CurrentPath path={state.currentPath} target={state.query.personB} />
+              </CardContent>
+            )}
+
+            {isCompleted && state.path.length > 0 && (
+              <CardContent className="pt-0 pb-4 border-t border-foreground/10">
+                <div className="pt-4">
+                  <FinalPath path={state.path} evidence={state.evidence} />
+                </div>
+              </CardContent>
+            )}
+          </Card>
+
+          {/* Segment selector - vertical list on desktop */}
           {hasSegments && (
-            <div className="pt-3">
-              <ProgressBar segments={state.segments} />
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-foreground/40 uppercase tracking-wide px-1">
+                Segments
+              </div>
+              <div className="flex flex-col gap-1">
+                {state.segments.map((segment) => (
+                  <button
+                    key={segment.id}
+                    onClick={() => handleTabChange(segment.id)}
+                    className={cn(
+                      "w-full rounded-lg px-3 py-2.5 text-left text-sm border transition-all",
+                      "flex items-center justify-between gap-2",
+                      activeSegmentId === segment.id
+                        ? "bg-foreground text-background border-foreground shadow-sm"
+                        : "border-foreground/10 text-foreground/70 hover:border-foreground/20 hover:bg-foreground/[0.02]",
+                      segment.status === "failed" && activeSegmentId !== segment.id && "opacity-50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate">{segment.from}</span>
+                      <ArrowRight size={12} className="opacity-40 shrink-0" />
+                      <span className="truncate">{segment.to}</span>
+                    </div>
+                    <div className="shrink-0">
+                      {segment.status === "running" && <Loader2 size={12} className="animate-spin" />}
+                      {segment.status === "success" && <Check size={12} strokeWidth={2.5} />}
+                      {segment.status === "failed" && <X size={12} className="opacity-50" />}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-        </CardHeader>
+        </div>
 
-        {isRunning && state.currentPath.length > 0 && (
-          <CardContent className="pt-0 pb-4 border-t border-dashed border-foreground/8">
-            <div className="text-[10px] text-foreground/40 uppercase tracking-wide mb-2 pt-3">
-              Exploring
+        {/* Right column - Segment Details */}
+        <div className="flex-1 min-w-0 overflow-hidden lg:overflow-auto">
+          {activeSegment ? (
+            <Card className="rounded-xl border shadow-sm h-full overflow-hidden">
+              <CardContent className="pt-5 pb-5 overflow-auto max-h-full">
+                <SegmentDetail segment={activeSegment} />
+              </CardContent>
+            </Card>
+          ) : !hasSegments && state.steps.length > 0 ? (
+            /* Legacy steps */
+            <Card className="rounded-xl border shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs text-foreground/40 uppercase tracking-wide">
+                  Progress
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pb-4">
+                <Accordion
+                  type="multiple"
+                  defaultValue={state.steps.filter(s => s.status === "running").map((_, i) => `legacy-step-${i}`)}
+                >
+                  {state.steps.map((step, idx) => (
+                    <StepItem key={`${step.id}-${idx}`} step={step} value={`legacy-step-${idx}`} />
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="h-full flex items-center justify-center text-foreground/30">
+              <div className="text-center">
+                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                <p className="text-sm">Starting investigation...</p>
+              </div>
             </div>
-            <CurrentPath path={state.currentPath} target={state.query.personB} />
-          </CardContent>
-        )}
-
-        {isCompleted && state.path.length > 0 && (
-          <CardContent className="pt-0 pb-4 border-t border-foreground/10">
-            <div className="pt-4">
-              <FinalPath path={state.path} evidence={state.evidence} />
-            </div>
-          </CardContent>
-        )}
-      </Card>
-
-      {/* Segment tabs */}
-      {hasSegments && (
-        <Tabs value={activeSegmentId || undefined} onValueChange={handleTabChange}>
-          <TabsList className="w-full h-auto flex-wrap gap-1.5 bg-transparent p-0">
-            {state.segments.map((segment) => (
-              <TabsTrigger
-                key={segment.id}
-                value={segment.id}
-                className={cn(
-                  "rounded-lg px-3 py-2 text-xs border transition-all",
-                  "data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:border-foreground data-[state=active]:shadow-sm",
-                  "data-[state=inactive]:border-foreground/10 data-[state=inactive]:text-foreground/60 data-[state=inactive]:hover:border-foreground/20",
-                  "flex items-center gap-1.5",
-                  segment.status === "failed" && "data-[state=inactive]:opacity-50"
-                )}
-              >
-                <span className="truncate max-w-[80px]">{segment.from}</span>
-                <ArrowRight size={10} className="opacity-40" />
-                <span className="truncate max-w-[80px]">{segment.to}</span>
-                {segment.status === "running" && <Loader2 size={10} className="animate-spin ml-0.5" />}
-                {segment.status === "success" && <Check size={10} className="ml-0.5" strokeWidth={2.5} />}
-                {segment.status === "failed" && <X size={10} className="ml-0.5 opacity-50" />}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {state.segments.map((segment) => (
-            <TabsContent key={segment.id} value={segment.id} className="mt-3">
-              <Card className="rounded-xl border shadow-sm">
-                <CardContent className="pt-5 pb-5">
-                  <SegmentDetail segment={segment} />
-                </CardContent>
-              </Card>
-            </TabsContent>
-          ))}
-        </Tabs>
-      )}
-
-      {/* Legacy steps */}
-      {!hasSegments && state.steps.length > 0 && (
-        <Card className="rounded-xl border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs text-foreground/40 uppercase tracking-wide">
-              Progress
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pb-4">
-            <Accordion
-              type="multiple"
-              defaultValue={state.steps.filter(s => s.status === "running").map((_, i) => `legacy-step-${i}`)}
-            >
-              {state.steps.map((step, idx) => (
-                <StepItem key={`${step.id}-${idx}`} step={step} value={`legacy-step-${idx}`} />
-              ))}
-            </Accordion>
-          </CardContent>
-        </Card>
-      )}
-
+          )}
+        </div>
+      </div>
     </div>
   );
 }

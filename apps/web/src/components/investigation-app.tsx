@@ -4,7 +4,7 @@ import { useRef, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Search, ArrowRight, Loader2, RotateCcw } from "lucide-react"
+import { Search, ArrowRight, Loader2, RotateCcw, Square } from "lucide-react"
 import { parseQuery } from "@/lib/query-parser"
 import { InvestigationTracker } from "@/components/investigation/investigation-tracker"
 import type {
@@ -402,6 +402,27 @@ export function InvestigationApp() {
     }
   };
 
+  const handleStop = () => {
+    if (stopPollingRef.current) {
+      stopPollingRef.current();
+      stopPollingRef.current = null;
+    }
+    // Mark the investigation as stopped but keep the results
+    setInvestigationState(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        status: "failed" as const,
+        logs: [...prev.logs, {
+          type: "error" as const,
+          message: "Investigation stopped by user",
+          timestamp: Date.now()
+        }]
+      };
+    });
+    setIsLoading(false);
+  };
+
   const handleNewSearch = () => {
     if (stopPollingRef.current) {
       stopPollingRef.current();
@@ -414,43 +435,83 @@ export function InvestigationApp() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shrink-0 z-50">
+        <div className="px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-primary/10 size-10 rounded-lg flex items-center justify-center">
-              <Search className="size-5 text-primary" />
+            <div className="bg-primary/10 size-9 rounded-lg flex items-center justify-center">
+              <Search className="size-4 text-primary" />
             </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">Visual Degrees</h1>
-              <p className="text-xs text-muted-foreground">Find photo connections between any two people</p>
-            </div>
+            <h1 className="text-lg font-semibold tracking-tight">Visual Degrees</h1>
           </div>
+
+          {/* Search bar in header when investigation is active */}
           {investigationState && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleNewSearch}
-              className="gap-2"
-            >
-              <RotateCcw className="size-4" />
-              New Search
-            </Button>
+            <form onSubmit={handleSubmit} className="flex-1 max-w-md mx-8">
+              <div className="relative">
+                <Input
+                  type="text"
+                  placeholder="New search..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="h-9 pr-10 rounded-lg bg-muted/50 text-sm"
+                  disabled={isLoading}
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!query.trim() || isLoading}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-md"
+                  variant="ghost"
+                >
+                  {isLoading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="size-4" />
+                  )}
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {investigationState && (
+            <div className="flex items-center gap-2">
+              {isLoading && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleStop}
+                  className="gap-2 h-8"
+                >
+                  <Square className="size-3 fill-current" />
+                  Stop
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNewSearch}
+                className="gap-2 h-8"
+              >
+                <RotateCcw className="size-3" />
+                New
+              </Button>
+            </div>
           )}
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 container mx-auto px-4 py-8">
+      <main className="flex-1 overflow-hidden">
         {!investigationState ? (
           /* Search Form - Centered when no investigation */
-          <div className="flex flex-col items-center justify-center min-h-[60vh]">
-            <div className="w-full max-w-2xl space-y-8">
+          <div className="h-full flex flex-col items-center justify-center px-4">
+            <div className="w-full max-w-xl space-y-8">
               <div className="text-center space-y-2">
                 <h2 className="text-3xl font-bold tracking-tight">Who is connected to who?</h2>
                 <p className="text-muted-foreground">
-                  Enter two people to find visual proof of their connection through photos
+                  Find visual proof of connections between any two people through photos
                 </p>
               </div>
 
@@ -458,7 +519,7 @@ export function InvestigationApp() {
                 <div className="relative">
                   <Input
                     type="text"
-                    placeholder="e.g., Elon Musk to Beyonce, or 'connect Taylor Swift and Travis Kelce'"
+                    placeholder="e.g., Elon Musk to Beyonce"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     className={cn(
@@ -513,50 +574,15 @@ export function InvestigationApp() {
             </div>
           </div>
         ) : (
-          /* Investigation View */
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Compact Search Bar at top during investigation */}
-            <form onSubmit={handleSubmit} className="flex gap-3">
-              <div className="relative flex-1">
-                <Input
-                  type="text"
-                  placeholder="Start a new search..."
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  className="h-11 pr-12 rounded-xl bg-muted/50"
-                  disabled={isLoading}
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={!query.trim() || isLoading}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 size-8 rounded-lg"
-                >
-                  {isLoading ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ArrowRight className="size-4" />
-                  )}
-                </Button>
-              </div>
-            </form>
-
+          /* Investigation View - Full viewport */
+          <div className="h-full overflow-auto">
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive px-6 pt-4">{error}</p>
             )}
-
-            {/* Investigation Tracker */}
-            <InvestigationTracker state={investigationState} />
+            <InvestigationTracker state={investigationState} className="p-6" />
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t py-4 mt-auto">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          Powered by AI image analysis
-        </div>
-      </footer>
     </div>
   )
 }

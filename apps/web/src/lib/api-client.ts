@@ -170,6 +170,104 @@ export async function pollEvents(
   return response.json();
 }
 
+// ============================================================================
+// Graph API Types and Functions
+// ============================================================================
+
+export interface GraphData {
+  nodes: Array<{
+    id: string;
+    name: string;
+    thumbnailUrl: string | null;
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    confidence: number;
+    evidenceUrl: string | null;
+    thumbnailUrl: string | null;
+    contextUrl: string | null;
+  }>;
+}
+
+export interface GraphStats {
+  nodeCount: number;
+  edgeCount: number;
+  avgConfidence: number;
+}
+
+/**
+ * Fetch the full social graph for visualization
+ */
+export async function fetchGraph(): Promise<GraphData> {
+  const response = await fetch(`${WORKER_URL}/api/graph`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch graph");
+  }
+  return response.json();
+}
+
+/**
+ * Fetch graph statistics
+ */
+export async function fetchGraphStats(): Promise<GraphStats> {
+  const response = await fetch(`${WORKER_URL}/api/graph/stats`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch graph stats");
+  }
+  return response.json();
+}
+
+// ============================================================================
+// Cached Path Lookup
+// ============================================================================
+
+/**
+ * Path step with evidence details
+ */
+export interface PathStep {
+  from: string;
+  fromName: string;
+  to: string;
+  toName: string;
+  confidence: number;
+  evidenceUrl: string | null;
+  thumbnailUrl: string | null;
+  contextUrl: string | null;
+}
+
+/**
+ * Result of a cached path lookup
+ */
+export interface CachedPathResult {
+  found: boolean;
+  path: string[];      // Node names in order
+  pathIds: string[];   // Node IDs in order
+  steps: PathStep[];   // Edge details for each hop
+  hops: number;
+  minConfidence: number;  // Bottleneck confidence
+}
+
+/**
+ * Look up a cached path between two people in the graph database
+ * Uses BFS to find the shortest existing path
+ */
+export async function findCachedPath(
+  fromName: string,
+  toName: string
+): Promise<CachedPathResult> {
+  const url = new URL(`${WORKER_URL}/api/graph/path`);
+  url.searchParams.set("from", fromName);
+  url.searchParams.set("to", toName);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error("Failed to lookup cached path");
+  }
+  return response.json();
+}
+
 /**
  * Creates a polling loop that calls onEvents whenever new events arrive
  */

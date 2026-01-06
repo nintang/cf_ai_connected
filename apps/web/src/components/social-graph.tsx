@@ -371,7 +371,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
     <div className={`relative flex flex-col h-full ${className || ""}`}>
       {/* Search bar - hidden in compact mode */}
       {!compact && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-72">
+        <div className="absolute top-3 sm:top-4 left-2 right-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-10 sm:w-72 max-w-[calc(100%-1rem)]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
             <Input
@@ -379,7 +379,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
               placeholder="Search people..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-8 bg-white/95 backdrop-blur-sm border-zinc-200 shadow-sm"
+              className="pl-9 pr-8 bg-white/95 backdrop-blur-sm border-zinc-200 shadow-sm text-sm h-9 sm:h-10"
             />
             {searchQuery && (
               <button
@@ -392,12 +392,12 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
           </div>
           {/* Search results dropdown */}
           {filteredNodes.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 rounded-lg shadow-lg max-h-40 sm:max-h-48 overflow-y-auto">
               {filteredNodes.slice(0, 10).map((node) => (
                 <button
                   key={node.id}
                   onClick={() => focusNode(node.id)}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 first:rounded-t-lg last:rounded-b-lg"
+                  className="w-full text-left px-3 py-2 text-xs sm:text-sm hover:bg-zinc-100 first:rounded-t-lg last:rounded-b-lg"
                 >
                   {node.name}
                 </button>
@@ -410,7 +410,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
             </div>
           )}
           {searchQuery && filteredNodes.length === 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 rounded-lg shadow-lg px-3 py-2 text-sm text-zinc-500">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 rounded-lg shadow-lg px-3 py-2 text-xs sm:text-sm text-zinc-500">
               No people found
             </div>
           )}
@@ -418,19 +418,19 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
       )}
 
       {/* Controls */}
-      <div className={`absolute ${compact ? "top-2 left-2" : "top-4 left-4"} z-10 flex gap-1`}>
+      <div className={`absolute ${compact ? "top-2 left-2" : "top-14 sm:top-4 left-2 sm:left-4"} z-10 flex gap-1`}>
         <Button
           variant="secondary"
           size="icon"
           onClick={loadGraph}
           disabled={isLoading}
           title="Refresh"
-          className={compact ? "h-7 w-7" : ""}
+          className={compact ? "h-7 w-7" : "h-8 w-8 sm:h-10 sm:w-10"}
         >
           {isLoading ? (
-            <Loader2 className={`${compact ? "h-3 w-3" : "h-4 w-4"} animate-spin`} />
+            <Loader2 className={`${compact ? "h-3 w-3" : "h-3.5 w-3.5 sm:h-4 sm:w-4"} animate-spin`} />
           ) : (
-            <RefreshCw className={compact ? "h-3 w-3" : "h-4 w-4"} />
+            <RefreshCw className={compact ? "h-3 w-3" : "h-3.5 w-3.5 sm:h-4 sm:w-4"} />
           )}
         </Button>
         <Button
@@ -438,36 +438,36 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
           size="icon"
           onClick={handleZoomIn}
           title="Zoom in"
-          className={compact ? "h-7 w-7" : ""}
+          className={compact ? "h-7 w-7" : "h-8 w-8 sm:h-10 sm:w-10"}
         >
-          <ZoomIn className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <ZoomIn className={compact ? "h-3 w-3" : "h-3.5 w-3.5 sm:h-4 sm:w-4"} />
         </Button>
         <Button
           variant="secondary"
           size="icon"
           onClick={handleZoomOut}
           title="Zoom out"
-          className={compact ? "h-7 w-7" : ""}
+          className={compact ? "h-7 w-7" : "h-8 w-8 sm:h-10 sm:w-10"}
         >
-          <ZoomOut className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <ZoomOut className={compact ? "h-3 w-3" : "h-3.5 w-3.5 sm:h-4 sm:w-4"} />
         </Button>
         <Button
           variant="secondary"
           size="icon"
           onClick={handleReset}
           title="Reset view"
-          className={compact ? "h-7 w-7" : ""}
+          className={compact ? "h-7 w-7" : "h-8 w-8 sm:h-10 sm:w-10"}
         >
-          <Maximize2 className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <Maximize2 className={compact ? "h-3 w-3" : "h-3.5 w-3.5 sm:h-4 sm:w-4"} />
         </Button>
       </div>
 
       {/* Stats & Focus indicator - hidden in compact mode (shown in header) */}
       {!compact && (
-        <div className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1.5 text-xs border border-zinc-200 shadow-sm">
+        <div className="absolute top-14 sm:top-4 right-2 sm:right-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs border border-zinc-200 shadow-sm">
           {focusedNode ? (
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-zinc-500 truncate min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <span className="text-zinc-500 truncate min-w-0 max-w-[100px] sm:max-w-none">
                 <span className="text-zinc-900 font-medium">{allNodes.find(n => n.id === focusedNode)?.name}</span>
               </span>
               <button
@@ -480,10 +480,10 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
           ) : (
             <div className="text-zinc-500 whitespace-nowrap">
               <span className="text-zinc-900 font-medium">{stats.nodes}</span>
-              <span className="ml-1">people</span>
-              <span className="mx-1.5 text-zinc-300">·</span>
+              <span className="ml-0.5 sm:ml-1 hidden xs:inline">people</span>
+              <span className="mx-1 sm:mx-1.5 text-zinc-300">·</span>
               <span className="text-zinc-900 font-medium">{stats.edges}</span>
-              <span className="ml-1">connections</span>
+              <span className="ml-0.5 sm:ml-1 hidden xs:inline">connections</span>
             </div>
           )}
         </div>
@@ -491,9 +491,9 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
 
       {/* Node info tooltip */}
       {activeNodeInfo && !activeEdgeInfo && (
-        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg p-4 max-w-xs border border-zinc-200 shadow-sm">
-          <div className="font-semibold text-zinc-900">{activeNodeInfo.name}</div>
-          <div className="text-sm text-zinc-500 mt-1">
+        <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-auto z-10 bg-white/95 backdrop-blur-sm rounded-lg p-2.5 sm:p-4 sm:max-w-xs border border-zinc-200 shadow-sm">
+          <div className="font-semibold text-zinc-900 text-sm sm:text-base truncate">{activeNodeInfo.name}</div>
+          <div className="text-xs sm:text-sm text-zinc-500 mt-0.5 sm:mt-1">
             {activeNodeInfo.connections} connection{activeNodeInfo.connections !== 1 ? "s" : ""}
           </div>
         </div>
@@ -501,10 +501,10 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
 
       {/* Edge info tooltip with evidence image */}
       {activeEdgeInfo && (
-        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg overflow-hidden max-w-sm border border-zinc-200 shadow-lg">
+        <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-auto z-10 bg-white/95 backdrop-blur-sm rounded-lg overflow-hidden sm:max-w-sm border border-zinc-200 shadow-lg">
           {/* Evidence image */}
           {activeEdgeInfo.thumbnailUrl && (
-            <div className="relative w-full aspect-video bg-zinc-100">
+            <div className="relative w-full aspect-video bg-zinc-100 max-h-32 sm:max-h-none">
               <img
                 src={activeEdgeInfo.thumbnailUrl}
                 alt="Evidence"
@@ -518,12 +518,12 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
           )}
 
           {/* Edge details */}
-          <div className="p-4">
-            <div className="font-semibold text-zinc-900 text-sm">
+          <div className="p-2.5 sm:p-4">
+            <div className="font-semibold text-zinc-900 text-xs sm:text-sm truncate">
               {activeEdgeInfo.sourceName} ↔ {activeEdgeInfo.targetName}
             </div>
-            <div className="flex items-center gap-2 mt-2">
-              <div className="text-xs text-zinc-500">
+            <div className="flex items-center gap-2 mt-1.5 sm:mt-2 flex-wrap">
+              <div className="text-[10px] sm:text-xs text-zinc-500">
                 Confidence: <span className="font-medium text-zinc-700">{Math.round(activeEdgeInfo.confidence)}%</span>
               </div>
               {activeEdgeInfo.contextUrl && (
@@ -531,7 +531,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
                   href={activeEdgeInfo.contextUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700"
+                  className="inline-flex items-center gap-1 text-[10px] sm:text-xs text-indigo-600 hover:text-indigo-700"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <ExternalLink className="h-3 w-3" />
@@ -540,7 +540,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
               )}
             </div>
             {!activeEdgeInfo.thumbnailUrl && (
-              <div className="text-xs text-zinc-400 mt-2">Click edge to open source</div>
+              <div className="text-[10px] sm:text-xs text-zinc-400 mt-1.5 sm:mt-2">Click edge to open source</div>
             )}
           </div>
         </div>
@@ -549,19 +549,19 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
       {/* Loading state */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
-          <div className="flex flex-col items-center gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
-            <span className="text-zinc-500">Loading graph...</span>
+          <div className="flex flex-col items-center gap-2 sm:gap-3">
+            <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-indigo-500" />
+            <span className="text-zinc-500 text-sm sm:text-base">Loading graph...</span>
           </div>
         </div>
       )}
 
       {/* Error state */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20 p-4">
           <div className="text-center">
-            <div className="text-red-500 mb-2">{error}</div>
-            <Button variant="secondary" onClick={loadGraph}>
+            <div className="text-red-500 mb-2 text-sm sm:text-base">{error}</div>
+            <Button variant="secondary" size="sm" onClick={loadGraph}>
               Try again
             </Button>
           </div>
@@ -570,10 +570,10 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
 
       {/* Empty state */}
       {!isLoading && !error && stats.nodes === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center z-20">
+        <div className="absolute inset-0 flex items-center justify-center z-20 p-4">
           <div className="text-center max-w-md">
-            <div className="text-zinc-600 text-lg mb-2">No connections yet</div>
-            <div className="text-zinc-500 text-sm">
+            <div className="text-zinc-600 text-base sm:text-lg mb-1 sm:mb-2">No connections yet</div>
+            <div className="text-zinc-500 text-xs sm:text-sm">
               Run some investigations to discover connections between people.
               Each verified connection will appear here in the social graph.
             </div>
@@ -585,7 +585,7 @@ export function SocialGraph({ className, compact = false, onStatsChange }: Socia
       <div
         ref={containerRef}
         className="flex-1 w-full bg-zinc-50"
-        style={{ minHeight: "500px", cursor: isDragging ? "grabbing" : "grab" }}
+        style={{ minHeight: "min(500px, 60vh)", cursor: isDragging ? "grabbing" : "grab" }}
       />
     </div>
   );

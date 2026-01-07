@@ -8,7 +8,12 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import { fetchGraph } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Loader2, ExternalLink, Search, X } from "lucide-react";
+import { WebsitePreviewModal } from "@/components/ui/website-preview-modal";
+import { useGraphSubscription, GraphEdgeUpdate } from "@/hooks/use-graph-subscription";
+import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Loader2, ExternalLink, Search, X, Wifi, WifiOff } from "lucide-react";
+
+// Animation duration for smooth transitions
+const ANIMATION_DURATION = 500;
 
 // Color palette for nodes
 const NODE_COLORS = [
@@ -56,7 +61,126 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
   const [searchQuery, setSearchQuery] = useState("");
   const [allNodes, setAllNodes] = useState<Array<{ id: string; name: string }>>([]);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [previewModal, setPreviewModal] = useState<{
+    open: boolean;
+    url: string;
+    thumbnailUrl?: string;
+    title?: string;
+  }>({ open: false, url: "" });
   const fullGraphDataRef = useRef<Awaited<ReturnType<typeof fetchGraph>> | null>(null);
+  const focusedNodeRef = useRef<string | null>(null);
+
+  // Keep focusedNodeRef in sync
+  useEffect(() => {
+    focusedNodeRef.current = focusedNode;
+  }, [focusedNode]);
+
+  // Handle real-time edge updates from WebSocket
+  const handleEdgeUpdate = useCallback((edge: GraphEdgeUpdate) => {
+    // Update fullGraphDataRef with new edge
+    if (fullGraphDataRef.current) {
+      const data = fullGraphDataRef.current;
+
+      // Add nodes if they don't exist
+      if (!data.nodes.find(n => n.id === edge.source)) {
+        data.nodes.push({ id: edge.source, name: edge.source, thumbnailUrl: null });
+        setAllNodes(prev => [...prev, { id: edge.source, name: edge.source }]);
+      }
+      if (!data.nodes.find(n => n.id === edge.target)) {
+        data.nodes.push({ id: edge.target, name: edge.target, thumbnailUrl: null });
+        setAllNodes(prev => [...prev, { id: edge.target, name: edge.target }]);
+      }
+
+      // Add edge if it doesn't exist
+      const existingEdge = data.edges.find(
+        e => (e.source === edge.source && e.target === edge.target) ||
+             (e.source === edge.target && e.target === edge.source)
+      );
+      if (!existingEdge) {
+        data.edges.push({
+          id: `${edge.source}-${edge.target}`,
+          source: edge.source,
+          target: edge.target,
+          confidence: edge.confidence,
+          evidenceUrl: null,
+          thumbnailUrl: edge.thumbnailUrl || null,
+          contextUrl: edge.contextUrl || null,
+        });
+      }
+    }
+
+    // Update the graph directly for smooth real-time updates
+    const graph = graphRef.current;
+    const sigma = sigmaRef.current;
+    if (!graph || !sigma) return;
+
+    // Check if we should show this edge (depends on focus state)
+    const currentFocus = focusedNodeRef.current;
+    if (currentFocus) {
+      // In focus mode - only add if edge connects to focused node
+      const isConnectedToFocus = edge.source === currentFocus || edge.target === currentFocus;
+      if (!isConnectedToFocus) return;
+    }
+
+    // Add source node if it doesn't exist
+    if (!graph.hasNode(edge.source)) {
+      const nodeCount = graph.order;
+      graph.addNode(edge.source, {
+        label: edge.source,
+        size: 15,
+        color: getNodeColor(nodeCount),
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+      });
+    }
+
+    // Add target node if it doesn't exist
+    if (!graph.hasNode(edge.target)) {
+      const nodeCount = graph.order;
+      graph.addNode(edge.target, {
+        label: edge.target,
+        size: 15,
+        color: getNodeColor(nodeCount),
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+      });
+    }
+
+    // Add edge if it doesn't exist
+    if (!graph.hasEdge(edge.source, edge.target) && !graph.hasEdge(edge.target, edge.source)) {
+      const edgeSize = Math.max(1, edge.confidence / 25);
+      graph.addEdge(edge.source, edge.target, {
+        size: edgeSize,
+        baseSize: edgeSize,
+        color: `rgba(156, 163, 175, ${edge.confidence / 100})`,
+        confidence: edge.confidence,
+        thumbnailUrl: edge.thumbnailUrl,
+        contextUrl: edge.contextUrl,
+      });
+
+      // Re-apply force layout
+      if (graph.order > 1) {
+        const settings = forceAtlas2.inferSettings(graph);
+        forceAtlas2.assign(graph, {
+          settings: { ...settings, gravity: 1 },
+          iterations: 50
+        });
+      }
+
+      // Update stats
+      const newStats = { nodes: graph.order, edges: graph.size };
+      setStats(newStats);
+      onStatsChange?.(newStats);
+
+      sigma.refresh();
+    }
+  }, [onStatsChange]);
+
+  // Subscribe to real-time graph updates via WebSocket
+  const { isConnected: wsConnected } = useGraphSubscription({
+    onEdgeUpdate: handleEdgeUpdate,
+    enabled: true,
+  });
 
   // Render graph with optional focus node filter
   const renderGraph = useCallback((data: Awaited<ReturnType<typeof fetchGraph>>, focusNodeId: string | null) => {
@@ -100,8 +224,10 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
     // Add edges with attributes
     filteredEdges.forEach((edge) => {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+        const edgeSize = Math.max(1, edge.confidence / 25);
         graph.addEdge(edge.source, edge.target, {
-          size: Math.max(1, edge.confidence / 25),
+          size: edgeSize,
+          baseSize: edgeSize, // Store for potential animations
           color: `rgba(156, 163, 175, ${edge.confidence / 100})`,
           confidence: edge.confidence,
           thumbnailUrl: edge.thumbnailUrl,
@@ -236,10 +362,20 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
     });
 
     sigma.on("clickEdge", ({ edge }) => {
-      // Open context URL if available
+      // Open context URL in preview modal
       const attrs = graph.getEdgeAttributes(edge);
       if (attrs.contextUrl) {
-        window.open(attrs.contextUrl, "_blank");
+        const source = graph.source(edge);
+        const target = graph.target(edge);
+        const sourceAttrs = graph.getNodeAttributes(source);
+        const targetAttrs = graph.getNodeAttributes(target);
+
+        setPreviewModal({
+          open: true,
+          url: attrs.contextUrl,
+          thumbnailUrl: attrs.thumbnailUrl || undefined,
+          title: `${sourceAttrs.label} ↔ ${targetAttrs.label}`,
+        });
       }
     });
 
@@ -308,25 +444,25 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
     };
   }, [autoRefresh, autoRefreshInterval, loadGraph]);
 
-  // Zoom controls
+  // Zoom controls with smooth animations
   const handleZoomIn = () => {
     if (sigmaRef.current) {
       const camera = sigmaRef.current.getCamera();
-      camera.animatedZoom({ duration: 300 });
+      camera.animatedZoom({ duration: ANIMATION_DURATION });
     }
   };
 
   const handleZoomOut = () => {
     if (sigmaRef.current) {
       const camera = sigmaRef.current.getCamera();
-      camera.animatedUnzoom({ duration: 300 });
+      camera.animatedUnzoom({ duration: ANIMATION_DURATION });
     }
   };
 
   const handleReset = () => {
     if (sigmaRef.current) {
       const camera = sigmaRef.current.getCamera();
-      camera.animatedReset({ duration: 300 });
+      camera.animatedReset({ duration: ANIMATION_DURATION });
     }
   };
 
@@ -493,14 +629,35 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
               >
                 All
               </button>
+              <span className="text-zinc-300">·</span>
+              {wsConnected ? (
+                <span className="flex items-center gap-1 text-emerald-600" title="Live updates active">
+                  <Wifi className="h-3 w-3" />
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-zinc-400" title="Connecting...">
+                  <WifiOff className="h-3 w-3" />
+                </span>
+              )}
             </div>
           ) : (
-            <div className="text-zinc-500 whitespace-nowrap">
+            <div className="flex items-center gap-1 sm:gap-1.5 text-zinc-500 whitespace-nowrap">
               <span className="text-zinc-900 font-medium">{stats.nodes}</span>
-              <span className="ml-0.5 sm:ml-1 hidden xs:inline">people</span>
-              <span className="mx-1 sm:mx-1.5 text-zinc-300">·</span>
+              <span className="hidden xs:inline">people</span>
+              <span className="text-zinc-300">·</span>
               <span className="text-zinc-900 font-medium">{stats.edges}</span>
-              <span className="ml-0.5 sm:ml-1 hidden xs:inline">connections</span>
+              <span className="hidden xs:inline">connections</span>
+              <span className="text-zinc-300">·</span>
+              {wsConnected ? (
+                <span className="flex items-center gap-1 text-emerald-600" title="Live updates active">
+                  <Wifi className="h-3 w-3" />
+                  <span className="hidden sm:inline">Live</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-zinc-400" title="Connecting...">
+                  <WifiOff className="h-3 w-3" />
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -603,6 +760,15 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
         ref={containerRef}
         className="flex-1 w-full bg-zinc-50"
         style={{ minHeight: "min(500px, 60vh)", cursor: isDragging ? "grabbing" : "grab" }}
+      />
+
+      {/* Website Preview Modal */}
+      <WebsitePreviewModal
+        open={previewModal.open}
+        onOpenChange={(open) => setPreviewModal((prev) => ({ ...prev, open }))}
+        url={previewModal.url}
+        thumbnailUrl={previewModal.thumbnailUrl}
+        title={previewModal.title}
       />
     </div>
   );

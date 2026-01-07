@@ -7,7 +7,100 @@ import { circular } from "graphology-layout";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import { fetchGraph } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
+import { WebsitePreviewModal } from "@/components/ui/website-preview-modal";
+import { useGraphSubscription, GraphEdgeUpdate } from "@/hooks/use-graph-subscription";
+import { ZoomIn, ZoomOut, Maximize2, ExternalLink, RefreshCw, Loader2, Wifi, WifiOff } from "lucide-react";
+
+// Animation utilities
+const ANIMATION_DURATION = 500;
+const PULSE_DURATION = 400; // Reduced for less flickering
+
+// Debounce sigma refresh to prevent flickering
+function createDebouncedRefresh(delay = 50) {
+  let timeoutId: NodeJS.Timeout | null = null;
+  return (sigma: Sigma | null) => {
+    if (!sigma) return;
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      sigma.refresh();
+    }, delay);
+  };
+}
+
+// Pulse animation for highlighting new connections - uses requestAnimationFrame for smoother animation
+function pulseNodes(
+  graph: Graph,
+  sigma: Sigma,
+  nodeIds: string[],
+  baseSize: number,
+  debouncedRefresh: (sigma: Sigma | null) => void
+): void {
+  const startTime = performance.now();
+
+  function animate(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / PULSE_DURATION, 1);
+
+    // Smooth pulse: grows then shrinks back
+    const scale = 1 + 0.3 * Math.sin(progress * Math.PI);
+
+    nodeIds.forEach((nodeId) => {
+      if (!graph.hasNode(nodeId)) return;
+      graph.setNodeAttribute(nodeId, "size", baseSize * scale);
+    });
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      // Reset to base size at end
+      nodeIds.forEach((nodeId) => {
+        if (!graph.hasNode(nodeId)) return;
+        graph.setNodeAttribute(nodeId, "size", baseSize);
+      });
+    }
+    debouncedRefresh(sigma);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// Pulse animation for edges - uses requestAnimationFrame for smoother animation
+function pulseEdges(
+  graph: Graph,
+  sigma: Sigma,
+  edgeIds: string[],
+  debouncedRefresh: (sigma: Sigma | null) => void
+): void {
+  const startTime = performance.now();
+
+  function animate(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / PULSE_DURATION, 1);
+
+    // Smooth pulse: grows then shrinks back
+    const scale = 1 + 0.8 * Math.sin(progress * Math.PI);
+
+    edgeIds.forEach((edgeId) => {
+      if (!graph.hasEdge(edgeId)) return;
+      const baseSize = graph.getEdgeAttribute(edgeId, "baseSize") || 1;
+      graph.setEdgeAttribute(edgeId, "size", baseSize * scale);
+    });
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      // Reset to base size at end
+      edgeIds.forEach((edgeId) => {
+        if (!graph.hasEdge(edgeId)) return;
+        const baseSize = graph.getEdgeAttribute(edgeId, "baseSize") || 1;
+        graph.setEdgeAttribute(edgeId, "size", baseSize);
+      });
+    }
+    debouncedRefresh(sigma);
+  }
+
+  requestAnimationFrame(animate);
+}
 
 // Color palette for nodes
 const NODE_COLORS = [
@@ -73,17 +166,153 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
     const [stats, setStats] = useState({ nodes: 0, edges: 0 });
     const [hoveredNode, setHoveredNode] = useState<string | null>(null);
     const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
+    const [previewModal, setPreviewModal] = useState<{
+      open: boolean;
+      url: string;
+      thumbnailUrl?: string;
+      title?: string;
+    }>({ open: false, url: "" });
 
     // Store highlight sets in refs for use in reducers
     const highlightedNodesRef = useRef<Set<string>>(new Set());
     const highlightedEdgesRef = useRef<Set<string>>(new Set());
 
-    // Update refs when props change
+    // Create debounced refresh to prevent flickering
+    const debouncedRefreshRef = useRef(createDebouncedRefresh(30));
+
+    // Handle real-time edge updates from WebSocket
+    const handleEdgeUpdate = useCallback((edge: GraphEdgeUpdate) => {
+      const graph = graphRef.current;
+      const sigma = sigmaRef.current;
+      if (!graph || !sigma) return;
+
+      const baseSize = compact ? 12 : 15;
+
+      // Normalize node IDs (use lowercase for consistency)
+      const sourceId = edge.source;
+      const targetId = edge.target;
+
+      // Add source node if it doesn't exist
+      if (!graph.hasNode(sourceId)) {
+        graph.addNode(sourceId, {
+          label: edge.source,
+          size: baseSize,
+          color: getNodeColor(edge.source),
+          x: Math.random() * 100,
+          y: Math.random() * 100,
+          originalColor: getNodeColor(edge.source),
+        });
+      }
+
+      // Add target node if it doesn't exist
+      if (!graph.hasNode(targetId)) {
+        graph.addNode(targetId, {
+          label: edge.target,
+          size: baseSize,
+          color: getNodeColor(edge.target),
+          x: Math.random() * 100,
+          y: Math.random() * 100,
+          originalColor: getNodeColor(edge.target),
+        });
+      }
+
+      // Add edge if it doesn't exist
+      if (!graph.hasEdge(sourceId, targetId) && !graph.hasEdge(targetId, sourceId)) {
+        // Position new nodes near existing connected nodes (if any)
+        const existingSource = graph.hasNode(sourceId);
+        const existingTarget = graph.hasNode(targetId);
+
+        if (!existingSource && existingTarget) {
+          // Position source near target
+          const targetPos = graph.getNodeAttributes(targetId);
+          graph.setNodeAttribute(sourceId, "x", targetPos.x + (Math.random() - 0.5) * 20);
+          graph.setNodeAttribute(sourceId, "y", targetPos.y + (Math.random() - 0.5) * 20);
+        } else if (existingSource && !existingTarget) {
+          // Position target near source
+          const sourcePos = graph.getNodeAttributes(sourceId);
+          graph.setNodeAttribute(targetId, "x", sourcePos.x + (Math.random() - 0.5) * 20);
+          graph.setNodeAttribute(targetId, "y", sourcePos.y + (Math.random() - 0.5) * 20);
+        }
+
+        const edgeSize = Math.max(1, edge.confidence / 25);
+        graph.addEdge(sourceId, targetId, {
+          size: edgeSize,
+          baseSize: edgeSize,
+          color: `rgba(99, 102, 241, ${Math.max(0.3, edge.confidence / 100)})`,
+          confidence: edge.confidence,
+          thumbnailUrl: edge.thumbnailUrl,
+          contextUrl: edge.contextUrl,
+          originalColor: `rgba(99, 102, 241, ${Math.max(0.3, edge.confidence / 100)})`,
+        });
+
+        // Skip force layout during live updates - just position new nodes near connected ones
+        // This prevents the whole graph from jumping around
+
+        // Trigger pulse animation for the new nodes and edge
+        pulseNodes(graph, sigma, [sourceId, targetId], baseSize, debouncedRefreshRef.current);
+        const edgeId = graph.edge(sourceId, targetId);
+        if (edgeId) {
+          pulseEdges(graph, sigma, [edgeId], debouncedRefreshRef.current);
+        }
+
+        // Update stats
+        setStats({ nodes: graph.order, edges: graph.size });
+
+        debouncedRefreshRef.current(sigma);
+      }
+    }, [compact]);
+
+    // Subscribe to real-time graph updates via WebSocket
+    const { isConnected: wsConnected } = useGraphSubscription({
+      onEdgeUpdate: handleEdgeUpdate,
+      enabled: true,
+    });
+
+    // Update refs when props change and trigger pulse animation
     useEffect(() => {
-      highlightedNodesRef.current = highlightedNodeIds || new Set();
-      highlightedEdgesRef.current = highlightedEdgeKeys || new Set();
-      sigmaRef.current?.refresh();
-    }, [highlightedNodeIds, highlightedEdgeKeys]);
+      const prevNodes = highlightedNodesRef.current;
+      const prevEdges = highlightedEdgesRef.current;
+      const newNodes = highlightedNodeIds || new Set();
+      const newEdges = highlightedEdgeKeys || new Set();
+
+      // Find newly added nodes and edges
+      const addedNodes = [...newNodes].filter((id) => !prevNodes.has(id));
+      const addedEdges = [...newEdges].filter((id) => !prevEdges.has(id));
+
+      // Only update if something actually changed
+      const nodesChanged = newNodes.size !== prevNodes.size || addedNodes.length > 0;
+      const edgesChanged = newEdges.size !== prevEdges.size || addedEdges.length > 0;
+
+      if (!nodesChanged && !edgesChanged) return;
+
+      highlightedNodesRef.current = newNodes;
+      highlightedEdgesRef.current = newEdges;
+      debouncedRefreshRef.current(sigmaRef.current);
+
+      // Trigger pulse animation for newly highlighted nodes
+      if (addedNodes.length > 0 && graphRef.current && sigmaRef.current) {
+        const baseSize = compact ? 12 : 15;
+        pulseNodes(graphRef.current, sigmaRef.current, addedNodes, baseSize * 1.2, debouncedRefreshRef.current);
+      }
+
+      // Trigger pulse animation for newly highlighted edges
+      if (addedEdges.length > 0 && graphRef.current && sigmaRef.current) {
+        // Find actual edge IDs from edge keys
+        const graph = graphRef.current;
+        const edgeIds: string[] = [];
+        addedEdges.forEach((edgeKey) => {
+          const [source, target] = edgeKey.split("_");
+          if (graph.hasEdge(source, target)) {
+            edgeIds.push(graph.edge(source, target) as string);
+          } else if (graph.hasEdge(target, source)) {
+            edgeIds.push(graph.edge(target, source) as string);
+          }
+        });
+        if (edgeIds.length > 0) {
+          pulseEdges(graphRef.current, sigmaRef.current, edgeIds, debouncedRefreshRef.current);
+        }
+      }
+    }, [highlightedNodeIds, highlightedEdgeKeys, compact]);
 
     // Load graph from database
     const loadGraph = useCallback(async () => {
@@ -121,8 +350,10 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
         // Add edges from database
         data.edges.forEach((edge) => {
           if (graph.hasNode(edge.source) && graph.hasNode(edge.target) && !graph.hasEdge(edge.source, edge.target)) {
+            const edgeSize = Math.max(1, edge.confidence / 25);
             graph.addEdge(edge.source, edge.target, {
-              size: Math.max(1, edge.confidence / 25),
+              size: edgeSize,
+              baseSize: edgeSize, // Store base size for pulse animations
               color: `rgba(99, 102, 241, ${Math.max(0.3, edge.confidence / 100)})`,
               confidence: edge.confidence,
               thumbnailUrl: edge.thumbnailUrl,
@@ -240,7 +471,17 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
         sigma.on("clickEdge", ({ edge }) => {
           const attrs = graph.getEdgeAttributes(edge);
           if (attrs.contextUrl) {
-            window.open(attrs.contextUrl, "_blank");
+            const source = graph.source(edge);
+            const target = graph.target(edge);
+            const sourceAttrs = graph.getNodeAttributes(source);
+            const targetAttrs = graph.getNodeAttributes(target);
+
+            setPreviewModal({
+              open: true,
+              url: attrs.contextUrl,
+              thumbnailUrl: attrs.thumbnailUrl || undefined,
+              title: `${sourceAttrs.label} ↔ ${targetAttrs.label}`,
+            });
           }
         });
 
@@ -277,17 +518,17 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
       },
     }), [loadGraph]);
 
-    // Zoom controls
+    // Zoom controls with smooth animations
     const handleZoomIn = () => {
-      sigmaRef.current?.getCamera().animatedZoom({ duration: 300 });
+      sigmaRef.current?.getCamera().animatedZoom({ duration: ANIMATION_DURATION });
     };
 
     const handleZoomOut = () => {
-      sigmaRef.current?.getCamera().animatedUnzoom({ duration: 300 });
+      sigmaRef.current?.getCamera().animatedUnzoom({ duration: ANIMATION_DURATION });
     };
 
     const handleReset = () => {
-      sigmaRef.current?.getCamera().animatedReset({ duration: 300 });
+      sigmaRef.current?.getCamera().animatedReset({ duration: ANIMATION_DURATION });
     };
 
     // Get edge info for tooltip
@@ -370,12 +611,23 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
         </div>
 
         {/* Stats */}
-        <div className={`absolute ${compact ? "top-2 right-2" : "top-4 right-4"} z-10 bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1.5 text-xs border border-zinc-200 shadow-sm`}>
+        <div className={`absolute ${compact ? "top-2 right-2" : "top-4 right-4"} z-10 bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1.5 text-xs border border-zinc-200 shadow-sm flex items-center gap-2`}>
           <span className="text-zinc-900 font-medium">{stats.nodes}</span>
-          <span className="text-zinc-400 ml-1">people</span>
-          <span className="text-zinc-300 mx-1.5">·</span>
+          <span className="text-zinc-400">people</span>
+          <span className="text-zinc-300">·</span>
           <span className="text-zinc-900 font-medium">{stats.edges}</span>
-          <span className="text-zinc-400 ml-1">connections</span>
+          <span className="text-zinc-400">connections</span>
+          <span className="text-zinc-300">·</span>
+          {wsConnected ? (
+            <span className="flex items-center gap-1 text-emerald-600" title="Live updates active">
+              <Wifi className="h-3 w-3" />
+              <span className="hidden sm:inline">Live</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-zinc-400" title="Connecting...">
+              <WifiOff className="h-3 w-3" />
+            </span>
+          )}
         </div>
 
         {/* Node tooltip */}
@@ -466,6 +718,15 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
         <div
           ref={containerRef}
           className="flex-1 w-full"
+        />
+
+        {/* Website Preview Modal */}
+        <WebsitePreviewModal
+          open={previewModal.open}
+          onOpenChange={(open) => setPreviewModal((prev) => ({ ...prev, open }))}
+          url={previewModal.url}
+          thumbnailUrl={previewModal.thumbnailUrl}
+          title={previewModal.title}
         />
       </div>
     );

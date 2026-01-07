@@ -11,6 +11,7 @@ import {
   Minus,
   Maximize2,
   RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 import type {
   InvestigationState,
@@ -225,11 +226,6 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
               <Maximize2 size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            {status === "evidence" && (
-              <div className="absolute top-1 right-1 rounded bg-foreground p-0.5">
-                <Check size={10} className="text-background" strokeWidth={3} />
-              </div>
-            )}
           </button>
 
           {status === "evidence" && celebrities && celebrities.length > 0 && (
@@ -413,21 +409,8 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
 }) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  const handleImageClick = (e: React.MouseEvent) => {
-    // On mobile (touch devices), show preview first
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-      e.preventDefault();
-      setIsPreviewOpen(true);
-    }
-    // On desktop, the link works normally
-  };
-
-  const handleOpenSource = () => {
-    if (evidence?.sourceUrl) {
-      window.open(evidence.sourceUrl, '_blank');
-    } else if (evidence?.thumbnailUrl) {
-      window.open(evidence.thumbnailUrl, '_blank');
-    }
+  const handleImageClick = () => {
+    setIsPreviewOpen(true);
   };
 
   return (
@@ -441,10 +424,7 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
         )}
       >
         {evidence?.thumbnailUrl ? (
-          <a
-            href={evidence.sourceUrl || evidence.thumbnailUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
             onClick={handleImageClick}
             className="relative shrink-0 overflow-hidden rounded-md hover:opacity-90 transition-opacity cursor-pointer"
           >
@@ -456,7 +436,7 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
             <div className="absolute bottom-0.5 right-0.5 rounded bg-foreground/80 p-0.5">
               <Check size={8} className="text-background" strokeWidth={3} />
             </div>
-          </a>
+          </button>
         ) : (
           <div className="flex size-10 sm:size-12 items-center justify-center rounded-md bg-foreground/5 shrink-0">
             <ImageIcon size={14} className="text-foreground/30 sm:size-[16px]" />
@@ -474,32 +454,37 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
         </div>
       </div>
 
-      {/* Mobile preview dialog - tap image to open source */}
+      {/* Image preview dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-sm p-3 sm:max-w-lg">
           <DialogTitle className="text-sm font-medium mb-2">
             {hop.from} & {hop.to}
           </DialogTitle>
           {evidence?.thumbnailUrl && (
-            <button
-              onClick={handleOpenSource}
-              className="relative w-full overflow-hidden rounded-lg cursor-pointer group"
-            >
+            <div className="w-full overflow-hidden rounded-lg">
               <img
                 src={evidence.thumbnailUrl}
                 alt={`${hop.from} with ${hop.to}`}
                 className="w-full h-auto max-h-[60vh] object-contain"
               />
-              <div className="absolute inset-0 bg-black/0 group-active:bg-black/10 transition-colors flex items-center justify-center">
-                <span className="text-xs text-white bg-black/60 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                  Tap to open source
-                </span>
-              </div>
-            </button>
+            </div>
           )}
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            {Math.ceil(hop.confidence)}% confidence • Tap image to view source
-          </p>
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-muted-foreground">
+              {Math.ceil(hop.confidence)}% confidence
+            </p>
+            {(evidence?.sourceUrl || evidence?.thumbnailUrl) && (
+              <a
+                href={evidence.sourceUrl || evidence.thumbnailUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-foreground/70 hover:text-foreground transition-colors"
+              >
+                View source
+                <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
@@ -697,7 +682,7 @@ export function InvestigationTracker({
                 Segments
               </div>
               {/* Mobile: horizontal scroll */}
-              <div className="flex lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0 scrollbar-thin">
+              <div className="flex lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0 scrollbar-none">
                 {state.segments.map((segment) => (
                   <button
                     key={segment.id}

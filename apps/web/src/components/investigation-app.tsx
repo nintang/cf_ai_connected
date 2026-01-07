@@ -6,9 +6,10 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Search, ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, Expand, Menu, X } from "lucide-react"
+import { ArrowRight, Loader2, RotateCcw, Square, Network, PanelRightClose, Expand, Menu, X } from "lucide-react"
 import { parseQuery } from "@/lib/query-parser"
 import { InvestigationTracker } from "@/components/investigation/investigation-tracker"
+import { ConnectedLogo } from "@/components/ui/connected-logo"
 import { useIsMobile } from "@/hooks/use-mobile"
 
 // Dynamic import for SocialGraph (requires DOM)
@@ -249,6 +250,7 @@ function mapWorkerEventsToState(
             from: edge.from,
             to: edge.to,
             thumbnailUrl: edge.thumbnailUrl || "",
+            evidenceUrl: (edge as { evidenceUrl?: string }).evidenceUrl || undefined,
             sourceUrl: edge.contextUrl || "",
             confidence: edge.confidence,
             description: `${edge.from} and ${edge.to}`,
@@ -473,6 +475,7 @@ export function InvestigationApp() {
           to: step.toName,
           confidence: step.confidence,
           thumbnailUrl: step.thumbnailUrl || "",
+          evidenceUrl: step.evidenceUrl || undefined,
           sourceUrl: step.contextUrl || "",
           description: `${step.fromName} photographed with ${step.toName}`,
         }));
@@ -576,19 +579,11 @@ export function InvestigationApp() {
       {/* Header */}
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shrink-0 z-50">
         <div className="px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-4">
-          {/* Logo and nav */}
+          {/* Logo */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="bg-primary/10 size-8 sm:size-9 rounded-lg flex items-center justify-center">
-              <Search className="size-3.5 sm:size-4 text-primary" />
-            </div>
-            <h1 className="text-base sm:text-lg font-semibold tracking-tight hidden xs:block">Connected?</h1>
-            <div className="hidden sm:block h-5 w-px bg-border ml-2" />
-            <Link href="/graph" className="hidden sm:block">
-              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
-                <Network className="size-4" />
-                Graph
-              </Button>
-            </Link>
+            <ConnectedLogo size={36} className="hidden sm:block" />
+            <ConnectedLogo size={32} className="sm:hidden" />
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight hidden xs:block">Connected<span className="text-primary">?</span></h1>
           </div>
 
           {/* Search bar in header when investigation is active - hidden on mobile */}
@@ -646,6 +641,13 @@ export function InvestigationApp() {
                 </Button>
               </>
             )}
+            {/* Graph link */}
+            <Link href="/graph" className="hidden sm:block">
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground h-7 sm:h-8">
+                <Network className="size-4" />
+                Graph
+              </Button>
+            </Link>
             {/* Mobile menu button */}
             <Button
               variant="ghost"
@@ -755,10 +757,16 @@ export function InvestigationApp() {
                       key={example}
                       variant="secondary"
                       size="sm"
-                      className="rounded-full text-xs h-7 sm:h-8 px-2.5 sm:px-3"
+                      className="rounded-full text-xs h-7 sm:h-8 px-2.5 sm:px-3 transition-all duration-150 hover:scale-105 hover:bg-primary/10 hover:text-primary active:scale-95 active:bg-primary/20"
                       onClick={() => {
                         setQuery(example);
+                        // Auto-submit after a brief delay for visual feedback
+                        setTimeout(() => {
+                          const form = document.querySelector('form');
+                          if (form) form.requestSubmit();
+                        }, 100);
                       }}
+                      disabled={isLoading}
                     >
                       {example}
                     </Button>
@@ -844,7 +852,7 @@ export function InvestigationApp() {
 
                   {/* Graph visualization */}
                   <div className="flex-1 min-h-0">
-                    <SocialGraph className="h-full" compact onStatsChange={setGraphStats} autoRefresh={isLoading} />
+                    <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
                   </div>
                 </div>
               </>
@@ -887,7 +895,7 @@ export function InvestigationApp() {
 
                 {/* Graph visualization - mobile */}
                 <div className="flex-1 min-h-0 bg-zinc-50">
-                  <SocialGraph className="h-full" compact onStatsChange={setGraphStats} autoRefresh={isLoading} />
+                  <SocialGraph className="h-full" compact onStatsChange={setGraphStats} />
                 </div>
               </div>
             )}

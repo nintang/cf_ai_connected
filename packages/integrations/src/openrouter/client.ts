@@ -245,8 +245,8 @@ Output ONLY valid JSON:
         headers: {
           "Authorization": `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://visual-degrees.app",
-          "X-Title": "Visual Degrees",
+          "HTTP-Referer": "https://connected.app",
+          "X-Title": "Connected?",
         },
         body: JSON.stringify({
           model: this.model,

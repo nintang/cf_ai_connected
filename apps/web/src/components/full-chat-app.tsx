@@ -101,7 +101,7 @@ function ChatSidebar() {
             <Search className="size-4 text-primary" />
           </div>
           <div className="text-md font-base text-primary tracking-tight">
-            Visual Degrees
+            Connected?
           </div>
         </div>
         <Button variant="ghost" className="size-8">
@@ -621,7 +621,7 @@ function ChatContent() {
     <main className="flex h-screen flex-col overflow-hidden">
       <header className="bg-background z-10 flex h-16 w-full shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
-        <div className="text-foreground">Visual Degrees Investigation</div>
+        <div className="text-foreground">Connected? Investigation</div>
       </header>
 
       <div ref={chatContainerRef} className="relative flex-1 overflow-y-auto">

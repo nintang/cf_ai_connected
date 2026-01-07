@@ -581,7 +581,7 @@ export function InvestigationApp() {
             <div className="bg-primary/10 size-8 sm:size-9 rounded-lg flex items-center justify-center">
               <Search className="size-3.5 sm:size-4 text-primary" />
             </div>
-            <h1 className="text-base sm:text-lg font-semibold tracking-tight hidden xs:block">Visual Degrees</h1>
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight hidden xs:block">Connected?</h1>
             <div className="hidden sm:block h-5 w-px bg-border ml-2" />
             <Link href="/graph" className="hidden sm:block">
               <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">

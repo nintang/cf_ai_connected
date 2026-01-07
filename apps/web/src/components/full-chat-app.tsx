@@ -100,8 +100,8 @@ function ChatSidebar() {
           <div className="bg-primary/10 size-8 rounded-md flex items-center justify-center">
             <Search className="size-4 text-primary" />
           </div>
-          <div className="text-md font-base text-primary tracking-tight">
-            Connected?
+          <div className="text-md font-base text-foreground tracking-tight">
+            Connected<span className="text-primary">?</span>
           </div>
         </div>
         <Button variant="ghost" className="size-8">
@@ -372,6 +372,7 @@ function mapWorkerEventsToState(
             from: edge.from,
             to: edge.to,
             thumbnailUrl: edge.thumbnailUrl || "",
+            evidenceUrl: (edge as { evidenceUrl?: string }).evidenceUrl || undefined,
             sourceUrl: edge.contextUrl || "",
             confidence: edge.confidence,
             description: `${edge.from} and ${edge.to}`,

@@ -80,8 +80,6 @@ function createEventEmitter(kv: KVNamespace, runId: string) {
     await kv.put(`${runId}:count`, String(eventIndex), {
       expirationTtl: 3600,
     });
-
-    console.log(`[${type}] ${message}`);
   };
 
   return {
@@ -313,8 +311,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (evidence.length > 0) {
           return createVerifiedEdge(personA, personB, evidence);
         }
-      } catch (e) {
-        console.error("Direct attempt failed", e);
+      } catch {
+        // Direct attempt failed
       }
       return null;
     });
@@ -345,8 +343,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           directEdge.bestEvidence.thumbnailUrl,
           directEdge.bestEvidence.contextUrl
         );
-      } catch (dbError) {
-        console.error("Failed to persist edge to graph DB:", dbError);
+      } catch {
+        // Failed to persist edge to graph DB - non-fatal
       }
 
       await completeStep("direct_check", true, `Direct connection verified with ${Math.round(directEdge.edgeConfidence)}% confidence!`);
@@ -800,8 +798,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             edgeToCandidate.bestEvidence.thumbnailUrl,
             edgeToCandidate.bestEvidence.contextUrl
           );
-        } catch (dbError) {
-          console.error("Failed to persist edge to graph DB:", dbError);
+        } catch {
+          // Failed to persist edge to graph DB - non-fatal
         }
 
         await completeStep("verify_bridge", true, `Connection verified with ${Math.round(edgeToCandidate.edgeConfidence)}% confidence`);
@@ -957,8 +955,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               bridgeEdge.bestEvidence.thumbnailUrl,
               bridgeEdge.bestEvidence.contextUrl
             );
-          } catch (dbError) {
-            console.error("Failed to persist edge to graph DB:", dbError);
+          } catch {
+            // Failed to persist edge to graph DB - non-fatal
           }
 
           await completeStep("connect_target", true, `Connection to ${personB} verified!`);

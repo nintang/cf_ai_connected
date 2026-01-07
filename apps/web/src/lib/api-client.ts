@@ -347,3 +347,67 @@ export function createEventPoller(
   };
 }
 
+/**
+ * Creates an SSE (Server-Sent Events) stream for real-time event updates
+ * This provides lower latency than polling and uses less bandwidth
+ */
+export function createEventStream(
+  runId: string,
+  onEvent: (event: InvestigationEvent) => void,
+  onComplete: () => void,
+  onError: (error: Error) => void
+): () => void {
+  const seenEventIds = new Set<string>();
+  let eventSource: EventSource | null = null;
+
+  // Get unique event ID
+  const getEventId = (e: InvestigationEvent): string => {
+    const data = e.data as Record<string, unknown> | undefined;
+    if (data?.eventId) {
+      return data.eventId as string;
+    }
+    return `${e.type}:${e.timestamp}:${e.message}`;
+  };
+
+  try {
+    const streamUrl = `${WORKER_URL}/api/chat/stream/${runId}`;
+    eventSource = new EventSource(streamUrl);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as InvestigationEvent;
+        const id = getEventId(parsed);
+
+        // Skip duplicates
+        if (seenEventIds.has(id)) {
+          return;
+        }
+        seenEventIds.add(id);
+
+        onEvent(parsed);
+
+        // Check for completion
+        if (parsed.type === "final" || parsed.type === "no_path" || parsed.type === "error") {
+          eventSource?.close();
+          onComplete();
+        }
+      } catch (err) {
+        console.warn("Failed to parse SSE event:", err);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error("SSE error:", err);
+      eventSource?.close();
+      onError(new Error("SSE connection error"));
+    };
+  } catch (err) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
+
+  // Return cleanup function
+  return () => {
+    eventSource?.close();
+  };
+}
+

@@ -390,6 +390,10 @@ export interface InvestigationEvent {
     query?: string;
     // For thinking events
     reasoning?: string;
+    /** Streaming chunk of AI thinking (append to previous chunks) */
+    thinkingChunk?: string;
+    /** Whether this is the final chunk of thinking */
+    thinkingComplete?: boolean;
     // For candidate_discovery / llm_selection
     candidates?: Array<{ name: string; score?: number; coappearCount?: number; reasoning?: string }>;
     // For image_result events

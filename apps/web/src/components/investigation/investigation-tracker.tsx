@@ -460,10 +460,10 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
           <DialogTitle className="text-sm font-medium mb-2">
             {hop.from} & {hop.to}
           </DialogTitle>
-          {evidence?.thumbnailUrl && (
+          {(evidence?.evidenceUrl || evidence?.thumbnailUrl) && (
             <div className="w-full overflow-hidden rounded-lg">
               <img
-                src={evidence.thumbnailUrl}
+                src={evidence.evidenceUrl || evidence.thumbnailUrl}
                 alt={`${hop.from} with ${hop.to}`}
                 className="w-full h-auto max-h-[60vh] object-contain"
               />
@@ -473,9 +473,9 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
             <p className="text-xs text-muted-foreground">
               {Math.ceil(hop.confidence)}% confidence
             </p>
-            {(evidence?.sourceUrl || evidence?.thumbnailUrl) && (
+            {evidence?.sourceUrl && (
               <a
-                href={evidence.sourceUrl || evidence.thumbnailUrl}
+                href={evidence.sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs text-foreground/70 hover:text-foreground transition-colors"

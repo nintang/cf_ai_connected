@@ -5,6 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 AWS_REGION = "us-east-1"
+# CORS - comma-separated list of allowed origins (can be overridden in production)
+ALLOWED_ORIGINS = "https://vd.nintang48.workers.dev,http://localhost:3000,http://localhost:3001"
 
 [ai]
 binding = "AI"
@@ -15,6 +17,12 @@ binding = "AI"
 binding = "INVESTIGATION_EVENTS"
 id = "58df6c4dedab42529ecf698fcd812220"
 preview_id = "58df6c4dedab42529ecf698fcd812220"
+
+# KV namespace for rate limiting (10 searches per hour per IP)
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "048330686cfa4232b4b503a9119a3192"
+preview_id = "048330686cfa4232b4b503a9119a3192"
 
 [[workflows]]
 name = "investigation"

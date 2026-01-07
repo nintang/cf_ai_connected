@@ -3,6 +3,7 @@ export interface Env {
   AI: Ai;
   INVESTIGATION_WORKFLOW: Workflow;
   INVESTIGATION_EVENTS: KVNamespace;
+  RATE_LIMIT: KVNamespace;
   GRAPH_DB: D1Database;
 
   // Environment variables
@@ -17,6 +18,8 @@ export interface Env {
   // Legacy Gemini (optional, for fallback)
   GEMINI_API_KEY?: string;
   GEMINI_GATEWAY_URL?: string;
+  // CORS - comma-separated list of allowed origins
+  ALLOWED_ORIGINS?: string;
 }
 
 export default {};

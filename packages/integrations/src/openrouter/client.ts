@@ -19,6 +19,11 @@ export interface OpenRouterConfig {
 }
 
 /**
+ * Callback for receiving streamed text chunks
+ */
+export type StreamCallback = (chunk: string, done: boolean) => void;
+
+/**
  * Result of visual co-presence verification
  */
 export interface VisualVerificationResult {
@@ -288,6 +293,208 @@ Output ONLY valid JSON:
         throw new Error(`OpenRouter request timeout after ${this.requestTimeout / 1000}s`);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Make a streaming request to OpenRouter API
+   * Returns a ReadableStream that emits text chunks
+   */
+  async makeStreamingRequest(
+    messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }>,
+    options?: { maxTokens?: number }
+  ): Promise<ReadableStream<string>> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://visual-degrees.app",
+        "X-Title": "Visual Degrees",
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages,
+        max_tokens: options?.maxTokens ?? 1024,
+        temperature: 0.7,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+    }
+
+    if (!response.body) {
+      throw new Error("No response body for streaming");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    return new ReadableStream<string>({
+      async pull(streamController) {
+        try {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            streamController.close();
+            return;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (data === "[DONE]") {
+                streamController.close();
+                return;
+              }
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices?.[0]?.delta?.content;
+                if (content) {
+                  streamController.enqueue(content);
+                }
+              } catch {
+                // Skip invalid JSON lines
+              }
+            }
+          }
+        } catch (error) {
+          streamController.error(error);
+        }
+      },
+      cancel() {
+        reader.cancel();
+      }
+    });
+  }
+
+  /**
+   * Suggest bridge candidates with streaming support
+   * Returns both the full result and a stream of reasoning text
+   */
+  async suggestBridgeCandidatesStreaming(
+    personA: string,
+    personB: string,
+    onChunk: StreamCallback,
+    exclude?: string[]
+  ): Promise<BridgeCandidateSuggestion[]> {
+    const excludeClause = exclude && exclude.length > 0
+      ? `\n\nIMPORTANT: Do NOT suggest any of these people (already tried): ${exclude.join(", ")}`
+      : "";
+
+    const stream = await this.makeStreamingRequest([
+      { role: "system", content: OpenRouterClient.BRIDGE_CANDIDATES_PROMPT },
+      { role: "user", content: `Find bridge candidates between:\nPerson A: ${personA}\nPerson B: ${personB}\n\nSuggest specific real people who might have been photographed with BOTH of them.${excludeClause}` },
+    ]);
+
+    let fullText = "";
+    const reader = stream.getReader();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += value;
+        onChunk(value, false);
+      }
+      onChunk("", true);
+    } finally {
+      reader.releaseLock();
+    }
+
+    // Parse the complete response
+    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed.bridgeCandidates)) {
+        return [];
+      }
+
+      return parsed.bridgeCandidates.map((bc: {
+        name?: string;
+        reasoning?: string;
+        connectionToA?: string;
+        connectionToB?: string;
+        confidence?: number;
+      }) => ({
+        name: String(bc.name ?? "Unknown"),
+        reasoning: String(bc.reasoning ?? ""),
+        connectionToA: String(bc.connectionToA ?? ""),
+        connectionToB: String(bc.connectionToB ?? ""),
+        confidence: typeof bc.confidence === "number" ? bc.confidence : 50,
+      })).slice(0, 10);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Select next expansion with streaming support
+   */
+  async selectNextExpansionStreaming(
+    input: PlannerInput,
+    onChunk: StreamCallback
+  ): Promise<PlannerOutput> {
+    const userPayload = {
+      task: "select_next_expansion",
+      personA: input.personA,
+      personB: input.personB,
+      frontier: input.frontier,
+      hopUsed: input.hopUsed,
+      hopLimit: input.hopLimit,
+      confidenceThreshold: input.confidenceThreshold,
+      budgets: input.budgets,
+      verifiedEdges: input.verifiedEdges,
+      failedCandidates: input.failedCandidates,
+      candidates: input.candidates.map(c => ({
+        name: c.name,
+        coappearCount: c.coappearCount,
+        bestCoappearConfidence: c.bestCoappearConfidence,
+      })),
+    };
+
+    try {
+      const stream = await this.makeStreamingRequest([
+        { role: "system", content: OpenRouterClient.PLANNER_SYSTEM_PROMPT },
+        { role: "user", content: `Current investigation state:\n${JSON.stringify(userPayload, null, 2)}\n\nSelect the best candidate(s) to explore next and provide search queries. Output ONLY valid JSON.` },
+      ]);
+
+      let fullText = "";
+      const reader = stream.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          fullText += value;
+          onChunk(value, false);
+        }
+        onChunk("", true);
+      } finally {
+        reader.releaseLock();
+      }
+
+      return this.parseAndValidatePlannerOutput(fullText, input);
+    } catch (error) {
+      console.warn("[OpenRouter] Streaming LLM call failed, using heuristic fallback:", error);
+      onChunk("", true);
+      return this.heuristicFallback(input);
     }
   }
 

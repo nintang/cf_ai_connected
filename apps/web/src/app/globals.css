@@ -9,7 +9,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-satoshi), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -124,6 +124,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-satoshi), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 }
 
@@ -193,6 +194,66 @@
 
 .processing-indicator {
   animation: processing-pulse 1.5s ease-in-out infinite;
+}
+
+/* Connection found gradient border animation */
+@keyframes gradient-rotate {
+  0% {
+    --gradient-angle: 0deg;
+  }
+  100% {
+    --gradient-angle: 360deg;
+  }
+}
+
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.connection-found-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.connection-found-glow::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--gradient-angle),
+    oklch(0.7 0.15 250),
+    oklch(0.75 0.18 300),
+    oklch(0.7 0.15 340),
+    oklch(0.65 0.12 30),
+    oklch(0.7 0.15 250)
+  );
+  animation: gradient-rotate 3s linear infinite;
+  z-index: -1;
+  opacity: 0.8;
+}
+
+.connection-found-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--card);
+  z-index: -1;
+}
+
+.dark .connection-found-glow::before {
+  background: conic-gradient(
+    from var(--gradient-angle),
+    oklch(0.6 0.2 250),
+    oklch(0.65 0.22 300),
+    oklch(0.6 0.2 340),
+    oklch(0.55 0.18 30),
+    oklch(0.6 0.2 250)
+  );
+  opacity: 0.9;
 }
 
 /* Custom scrollbar for mobile - thin and subtle */

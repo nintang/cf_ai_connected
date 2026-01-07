@@ -738,7 +738,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               }
             } catch (e) { continue; }
 
-            if (evidence.length >= 3) break;
+            // Stop searching once we find valid evidence - no need for multiple photos
+            if (evidence.length >= 1) break;
           }
 
           if (evidence.length > 0) {
@@ -923,7 +924,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 }
               }
             } catch (e) { continue; }
-            if (evidence.length >= 3) break;
+            // Stop searching once we find valid evidence - no need for multiple photos
+            if (evidence.length >= 1) break;
           }
           if (evidence.length > 0) return createVerifiedEdge(candidateName, personB, evidence);
           return null;

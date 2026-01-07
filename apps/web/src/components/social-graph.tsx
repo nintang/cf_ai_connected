@@ -8,30 +8,29 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import { fetchGraph } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { WebsitePreviewModal } from "@/components/ui/website-preview-modal";
+import { EvidenceImageModal } from "@/components/ui/evidence-image-modal";
 import { useGraphSubscription, GraphEdgeUpdate } from "@/hooks/use-graph-subscription";
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Loader2, ExternalLink, Search, X, Wifi, WifiOff } from "lucide-react";
 
 // Animation duration for smooth transitions
 const ANIMATION_DURATION = 500;
 
-// Color palette for nodes
+// Muted color palette - 4 sophisticated colors
 const NODE_COLORS = [
-  "#6366f1", // indigo
+  "#6366f1", // indigo - primary
   "#8b5cf6", // violet
-  "#ec4899", // pink
-  "#f43f5e", // rose
-  "#f97316", // orange
-  "#eab308", // yellow
-  "#22c55e", // green
-  "#14b8a6", // teal
-  "#06b6d4", // cyan
-  "#3b82f6", // blue
+  "#0ea5e9", // sky blue
+  "#10b981", // emerald
 ];
 
 function getNodeColor(index: number): string {
   return NODE_COLORS[index % NODE_COLORS.length];
 }
+
+// Node sizing
+const NODE_SIZE_DEFAULT = 5;
+const NODE_SIZE_FOCUS = 8;
+const NODE_SIZE_HOVER_MULTIPLIER = 1.3;
 
 interface SocialGraphProps {
   className?: string;
@@ -127,7 +126,7 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       const nodeCount = graph.order;
       graph.addNode(edge.source, {
         label: edge.source,
-        size: 15,
+        size: NODE_SIZE_DEFAULT,
         color: getNodeColor(nodeCount),
         x: Math.random() * 100,
         y: Math.random() * 100,
@@ -139,7 +138,7 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       const nodeCount = graph.order;
       graph.addNode(edge.target, {
         label: edge.target,
-        size: 15,
+        size: NODE_SIZE_DEFAULT,
         color: getNodeColor(nodeCount),
         x: Math.random() * 100,
         y: Math.random() * 100,
@@ -213,7 +212,7 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       const isFocusNode = node.id === focusNodeId;
       graph.addNode(node.id, {
         label: node.name,
-        size: isFocusNode ? 20 : 15,
+        size: isFocusNode ? NODE_SIZE_FOCUS : NODE_SIZE_DEFAULT,
         color: getNodeColor(index),
         x: isFocusNode ? 50 : Math.random() * 100,
         y: isFocusNode ? 50 : Math.random() * 100,
@@ -221,19 +220,29 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       });
     });
 
-    // Add edges with attributes
+    // Add edges with attributes - more visible edges
     filteredEdges.forEach((edge) => {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
-        const edgeSize = Math.max(1, edge.confidence / 25);
+        const edgeSize = Math.max(1.5, edge.confidence / 30);
         graph.addEdge(edge.source, edge.target, {
           size: edgeSize,
-          baseSize: edgeSize, // Store for potential animations
-          color: `rgba(156, 163, 175, ${edge.confidence / 100})`,
+          baseSize: edgeSize,
+          color: `rgba(100, 116, 139, ${0.4 + (edge.confidence / 200)})`, // More visible: slate color with higher opacity
           confidence: edge.confidence,
           thumbnailUrl: edge.thumbnailUrl,
+          evidenceUrl: edge.evidenceUrl, // Full-res image
           contextUrl: edge.contextUrl,
         });
       }
+    });
+
+    // Size nodes by connection count (degree)
+    graph.forEachNode((node) => {
+      const degree = graph.degree(node);
+      const baseSize = graph.getNodeAttribute(node, "size") || NODE_SIZE_DEFAULT;
+      // Scale size: more connections = slightly larger (max 2x)
+      const sizeMultiplier = 1 + Math.min(degree * 0.15, 1);
+      graph.setNodeAttribute(node, "size", baseSize * sizeMultiplier);
     });
 
     // Apply layouts
@@ -258,27 +267,29 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
 
     // Create new sigma instance
     const sigma = new Sigma(graph, containerRef.current, {
-      renderLabels: true,
-      labelSize: 14,
-      labelWeight: "bold",
-      labelColor: { color: "#18181b" },
+      renderLabels: !compact, // Hide labels in compact mode by default
+      labelSize: 12,
+      labelWeight: "500",
+      labelColor: { color: "#27272a" },
       defaultEdgeType: "line",
-      labelRenderedSizeThreshold: 0,
+      labelRenderedSizeThreshold: compact ? 100 : 0, // In compact mode, only show labels for very large nodes (effectively none)
       zoomToSizeRatioFunction: () => 1,
       enableEdgeEvents: true,
-      // Node reducer - dim nodes not connected to hovered node
+      // Node reducer - show labels on hover in compact mode, dim non-connected nodes
       nodeReducer: (node, data) => {
         const res = { ...data };
         const hovered = hoveredNodeRef.current;
 
         if (hovered) {
           if (node === hovered) {
-            // Hovered node - highlight
-            res.size = (data.size || 15) * 1.3;
+            // Hovered node - highlight and show label
+            res.size = (data.size || NODE_SIZE_DEFAULT) * NODE_SIZE_HOVER_MULTIPLIER;
             res.zIndex = 10;
+            res.forceLabel = true; // Force show label on hover
           } else if (hoveredNeighborsRef.current.has(node)) {
-            // Connected neighbor - keep visible
+            // Connected neighbor - keep visible, show label in compact mode
             res.zIndex = 5;
+            if (compact) res.forceLabel = true;
           } else {
             // Not connected - dim
             res.color = data.color + "40"; // 25% opacity
@@ -297,7 +308,7 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
         // Highlight hovered edge
         if (edge === hoveredEdgeRef.current) {
           res.color = "#6366f1";
-          res.size = Math.max(data.size || 1, 3);
+          res.size = Math.max(data.size || 1, 4);
           return res;
         }
 
@@ -308,10 +319,10 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
           if (source === hovered || target === hovered) {
             // Edge connected to hovered node - highlight
             res.color = "#6366f1";
-            res.size = Math.max(data.size || 1, 2);
+            res.size = Math.max(data.size || 1, 2.5);
           } else {
             // Not connected - dim
-            res.color = "rgba(156, 163, 175, 0.1)";
+            res.color = "rgba(156, 163, 175, 0.15)";
           }
         }
 
@@ -326,7 +337,6 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       hoveredNodeRef.current = node;
       hoveredNeighborsRef.current = new Set(graph.neighbors(node));
       setHoveredNode(node);
-      document.body.style.cursor = "pointer";
       sigma.refresh();
     });
 
@@ -334,7 +344,6 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       hoveredNodeRef.current = null;
       hoveredNeighborsRef.current = new Set();
       setHoveredNode(null);
-      document.body.style.cursor = "default";
       sigma.refresh();
     });
 
@@ -350,33 +359,30 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
     sigma.on("enterEdge", ({ edge }) => {
       hoveredEdgeRef.current = edge;
       setHoveredEdge(edge);
-      document.body.style.cursor = "pointer";
       sigma.refresh();
     });
 
     sigma.on("leaveEdge", () => {
       hoveredEdgeRef.current = null;
       setHoveredEdge(null);
-      document.body.style.cursor = "default";
       sigma.refresh();
     });
 
     sigma.on("clickEdge", ({ edge }) => {
-      // Open context URL in preview modal
+      // Open evidence image in preview modal
       const attrs = graph.getEdgeAttributes(edge);
-      if (attrs.contextUrl) {
-        const source = graph.source(edge);
-        const target = graph.target(edge);
-        const sourceAttrs = graph.getNodeAttributes(source);
-        const targetAttrs = graph.getNodeAttributes(target);
+      const source = graph.source(edge);
+      const target = graph.target(edge);
+      const sourceAttrs = graph.getNodeAttributes(source);
+      const targetAttrs = graph.getNodeAttributes(target);
 
-        setPreviewModal({
-          open: true,
-          url: attrs.contextUrl,
-          thumbnailUrl: attrs.thumbnailUrl || undefined,
-          title: `${sourceAttrs.label} ↔ ${targetAttrs.label}`,
-        });
-      }
+      setPreviewModal({
+        open: true,
+        url: attrs.contextUrl,
+        // Use full-res evidenceUrl if available, fallback to thumbnail
+        thumbnailUrl: attrs.evidenceUrl || attrs.thumbnailUrl || undefined,
+        title: `${sourceAttrs.label} ↔ ${targetAttrs.label}`,
+      });
     });
 
     // Drag cursor events
@@ -759,15 +765,18 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       <div
         ref={containerRef}
         className="flex-1 w-full bg-zinc-50"
-        style={{ minHeight: "min(500px, 60vh)", cursor: isDragging ? "grabbing" : "grab" }}
+        style={{
+          minHeight: "min(500px, 60vh)",
+          cursor: hoveredEdge || hoveredNode ? "pointer" : isDragging ? "grabbing" : "grab"
+        }}
       />
 
-      {/* Website Preview Modal */}
-      <WebsitePreviewModal
+      {/* Evidence Image Modal */}
+      <EvidenceImageModal
         open={previewModal.open}
-        onOpenChange={(open) => setPreviewModal((prev) => ({ ...prev, open }))}
-        url={previewModal.url}
-        thumbnailUrl={previewModal.thumbnailUrl}
+        onOpenChange={(open: boolean) => setPreviewModal((prev) => ({ ...prev, open }))}
+        imageUrl={previewModal.thumbnailUrl}
+        sourceUrl={previewModal.url}
         title={previewModal.title}
       />
     </div>

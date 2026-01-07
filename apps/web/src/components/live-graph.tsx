@@ -7,7 +7,7 @@ import { circular } from "graphology-layout";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import { fetchGraph } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { WebsitePreviewModal } from "@/components/ui/website-preview-modal";
+import { EvidenceImageModal } from "@/components/ui/evidence-image-modal";
 import { useGraphSubscription, GraphEdgeUpdate } from "@/hooks/use-graph-subscription";
 import { ZoomIn, ZoomOut, Maximize2, ExternalLink, RefreshCw, Loader2, Wifi, WifiOff } from "lucide-react";
 
@@ -168,10 +168,10 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
     const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
     const [previewModal, setPreviewModal] = useState<{
       open: boolean;
-      url: string;
-      thumbnailUrl?: string;
+      imageUrl?: string;
+      sourceUrl?: string;
       title?: string;
-    }>({ open: false, url: "" });
+    }>({ open: false });
 
     // Store highlight sets in refs for use in reducers
     const highlightedNodesRef = useRef<Set<string>>(new Set());
@@ -356,6 +356,7 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
               baseSize: edgeSize, // Store base size for pulse animations
               color: `rgba(99, 102, 241, ${Math.max(0.3, edge.confidence / 100)})`,
               confidence: edge.confidence,
+              evidenceUrl: edge.evidenceUrl,
               thumbnailUrl: edge.thumbnailUrl,
               contextUrl: edge.contextUrl,
               originalColor: `rgba(99, 102, 241, ${Math.max(0.3, edge.confidence / 100)})`,
@@ -470,7 +471,7 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
 
         sigma.on("clickEdge", ({ edge }) => {
           const attrs = graph.getEdgeAttributes(edge);
-          if (attrs.contextUrl) {
+          if (attrs.thumbnailUrl || attrs.evidenceUrl) {
             const source = graph.source(edge);
             const target = graph.target(edge);
             const sourceAttrs = graph.getNodeAttributes(source);
@@ -478,8 +479,8 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
 
             setPreviewModal({
               open: true,
-              url: attrs.contextUrl,
-              thumbnailUrl: attrs.thumbnailUrl || undefined,
+              imageUrl: attrs.evidenceUrl || attrs.thumbnailUrl || undefined,
+              sourceUrl: attrs.contextUrl || undefined,
               title: `${sourceAttrs.label} ↔ ${targetAttrs.label}`,
             });
           }
@@ -720,12 +721,12 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
           className="flex-1 w-full"
         />
 
-        {/* Website Preview Modal */}
-        <WebsitePreviewModal
+        {/* Evidence Image Modal */}
+        <EvidenceImageModal
           open={previewModal.open}
           onOpenChange={(open) => setPreviewModal((prev) => ({ ...prev, open }))}
-          url={previewModal.url}
-          thumbnailUrl={previewModal.thumbnailUrl}
+          imageUrl={previewModal.imageUrl}
+          sourceUrl={previewModal.sourceUrl}
           title={previewModal.title}
         />
       </div>

@@ -52,7 +52,7 @@ import type {
 import { createInitialState, STEP_TITLES } from "@/types/investigation"
 import {
   startInvestigation,
-  createEventPoller,
+  createEventStream,
   parseQueryWithAI,
   InvestigationEvent as WorkerEvent
 } from "@/lib/api-client"
@@ -178,6 +178,9 @@ function mapWorkerEventsToState(
     state.logs.map(l => l.data?.eventId as string || `${l.type}:${l.timestamp}:${l.message}`)
   );
 
+  // Track the most recent candidate reasoning to apply to next verify_bridge segment
+  let pendingCandidateReasoning: string | undefined;
+
   for (const event of events) {
     const timestamp = new Date(event.timestamp).getTime();
     const eventId = getEventId(event);
@@ -241,7 +244,13 @@ function mapWorkerEventsToState(
               status: "running",
               steps: [newStep],
               startTime: timestamp,
+              // Apply pending candidate reasoning for verify_bridge segments
+              candidateReasoning: (stepId === "verify_bridge" || stepId === "connect_target") ? pendingCandidateReasoning : undefined,
             };
+            // Clear the pending reasoning after applying it
+            if (stepId === "verify_bridge" || stepId === "connect_target") {
+              pendingCandidateReasoning = undefined;
+            }
             state.segments = [...state.segments, newSegment];
             state.activeSegmentId = segmentId;
           } else {
@@ -258,6 +267,11 @@ function mapWorkerEventsToState(
       }
 
       case "step_update": {
+        // Capture candidate reasoning when "Selected:" event comes through
+        if (event.message.toLowerCase().includes("selected:") && event.data?.reasoning) {
+          pendingCandidateReasoning = event.data.reasoning as string;
+        }
+
         // Update the step in the active segment only (segments are what we display)
         if (state.activeSegmentId) {
           const segmentIdx = state.segments.findIndex(s => s.id === state.activeSegmentId);
@@ -463,16 +477,16 @@ function ChatContent() {
       const response = await startInvestigation(personA, personB);
       const { runId } = response;
 
-      // Start polling for events
-      stopPollingRef.current = createEventPoller(
+      // Start SSE stream for events
+      stopPollingRef.current = createEventStream(
         runId,
-        (events, complete) => {
-          // Update the last message with new events
+        (event) => {
+          // Update the last message with the new event
           setChatMessages(prev => {
             const lastMsg = prev[prev.length - 1];
             if (lastMsg.role === "assistant" && lastMsg.investigationState) {
               const newState = mapWorkerEventsToState(
-                events,
+                [event],
                 personA,
                 personB,
                 lastMsg.investigationState
@@ -484,13 +498,13 @@ function ChatContent() {
             }
             return prev;
           });
-
-          if (complete) {
-            setIsLoading(false);
-          }
+        },
+        () => {
+          // Stream complete
+          setIsLoading(false);
         },
         (error) => {
-          console.error("Polling error:", error);
+          console.error("Stream error:", error);
           // Update state to show error
           setChatMessages(prev => {
             const lastMsg = prev[prev.length - 1];
@@ -515,8 +529,7 @@ function ChatContent() {
             return prev;
           });
           setIsLoading(false);
-        },
-        500 // Poll every 500ms
+        }
       );
     } catch (error) {
       console.error("Failed to start investigation:", error);

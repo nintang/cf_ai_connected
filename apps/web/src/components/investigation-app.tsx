@@ -27,7 +27,7 @@ import type {
 import { createInitialState, STEP_TITLES } from "@/types/investigation"
 import {
   startInvestigation,
-  createEventPoller,
+  createEventStream,
   parseQueryWithAI,
   findCachedPath,
   InvestigationEvent as WorkerEvent,
@@ -71,6 +71,9 @@ function mapWorkerEventsToState(
   const existingEventIds = new Set(
     state.logs.map(l => l.data?.eventId as string || `${l.type}:${l.timestamp}:${l.message}`)
   );
+
+  // Track the most recent candidate reasoning to apply to next verify_bridge segment
+  let pendingCandidateReasoning: string | undefined;
 
   for (const event of events) {
     const timestamp = new Date(event.timestamp).getTime();
@@ -127,7 +130,13 @@ function mapWorkerEventsToState(
               status: "running",
               steps: [newStep],
               startTime: timestamp,
+              // Apply pending candidate reasoning for verify_bridge segments
+              candidateReasoning: (stepId === "verify_bridge" || stepId === "connect_target") ? pendingCandidateReasoning : undefined,
             };
+            // Clear the pending reasoning after applying it
+            if (stepId === "verify_bridge" || stepId === "connect_target") {
+              pendingCandidateReasoning = undefined;
+            }
             state.segments = [...state.segments, newSegment];
             state.activeSegmentId = segmentId;
           } else {
@@ -143,6 +152,11 @@ function mapWorkerEventsToState(
       }
 
       case "step_update": {
+        // Capture candidate reasoning when "Selected:" event comes through
+        if (event.message.toLowerCase().includes("selected:") && event.data?.reasoning) {
+          pendingCandidateReasoning = event.data.reasoning as string;
+        }
+
         if (state.activeSegmentId) {
           const segmentIdx = state.segments.findIndex(s => s.id === state.activeSegmentId);
           if (segmentIdx >= 0) {
@@ -377,20 +391,21 @@ export function InvestigationApp() {
       const response = await startInvestigation(personA, personB);
       const { runId } = response;
 
-      stopPollingRef.current = createEventPoller(
+      stopPollingRef.current = createEventStream(
         runId,
-        (events, complete) => {
+        (event) => {
+          // Process single event from SSE stream
           setInvestigationState(prev => {
             if (!prev) return prev;
-            return mapWorkerEventsToState(events, personA, personB, prev);
+            return mapWorkerEventsToState([event], personA, personB, prev);
           });
-
-          if (complete) {
-            setIsLoading(false);
-          }
+        },
+        () => {
+          // Stream complete
+          setIsLoading(false);
         },
         (err) => {
-          console.error("Polling error:", err);
+          console.error("Stream error:", err);
           setInvestigationState(prev => {
             if (!prev) return prev;
             const errorLog: InvestigationEvent = {
@@ -405,8 +420,7 @@ export function InvestigationApp() {
             };
           });
           setIsLoading(false);
-        },
-        500
+        }
       );
     } catch (err) {
       console.error("Failed to start investigation:", err);

@@ -98,14 +98,14 @@ function BridgeCandidates({ candidates, selected, showReasoning = false }: {
                 "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                 isSelected
                   ? "bg-foreground text-background font-medium"
-                  : "bg-foreground/5 text-foreground/70"
+                  : "bg-foreground/10 text-foreground/80"
               )}
             >
               {candidate.name}
               {candidate.score && (
                 <span className={cn(
                   "text-[10px]",
-                  isSelected ? "text-background/70" : "text-foreground/40"
+                  isSelected ? "text-background/80" : "text-foreground/60"
                 )}>
                   {Math.round(candidate.score)}%
                 </span>
@@ -115,10 +115,10 @@ function BridgeCandidates({ candidates, selected, showReasoning = false }: {
         })}
       </div>
       {showReasoning && candidates.some(c => c.reasoning) && (
-        <div className="space-y-1.5 pl-2 border-l-2 border-foreground/10">
+        <div className="space-y-1.5 pl-2 border-l-2 border-foreground/20">
           {candidates.filter(c => c.reasoning).map((candidate, idx) => (
-            <div key={idx} className="text-xs text-foreground/40">
-              <span className="font-medium text-foreground/60">{candidate.name}:</span>{" "}
+            <div key={idx} className="text-xs text-foreground/60">
+              <span className="font-medium text-foreground/80">{candidate.name}:</span>{" "}
               {candidate.reasoning}
             </div>
           ))}
@@ -145,12 +145,12 @@ function StepEvent({ event }: { event: { type: string; message: string; data?: R
 
   return (
     <div className="space-y-1.5 overflow-hidden">
-      <div className="flex items-start gap-2 text-sm text-foreground/50">
-        <span className="text-foreground/30 mt-0.5 shrink-0">›</span>
+      <div className="flex items-start gap-2 text-sm text-foreground/70">
+        <span className="text-foreground/50 mt-0.5 shrink-0">›</span>
         <div className="flex-1 min-w-0">
           <span className="break-words">{event.message}</span>
           {query && (
-            <span className="ml-1.5 text-foreground/30 text-xs">
+            <span className="ml-1.5 text-foreground/50 text-xs">
               ({query})
             </span>
           )}
@@ -166,7 +166,7 @@ function StepEvent({ event }: { event: { type: string; message: string; data?: R
         </div>
       )}
       {reasoning && (
-        <div className="ml-5 text-xs text-foreground/40 italic break-words">
+        <div className="ml-5 text-xs text-foreground/60 italic break-words">
           {reasoning}
         </div>
       )}
@@ -195,10 +195,10 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
 
   return (
     <div className="space-y-2">
-      <div className="flex items-start gap-2 text-sm text-foreground/60">
+      <div className="flex items-start gap-2 text-sm text-foreground/70">
         <span className="shrink-0 mt-0.5">{StatusIconSmall}</span>
         <div className="flex-1 min-w-0">
-          <span className={status === "error" ? "text-red-500/80" : ""}>{event.message}</span>
+          <span className={status === "error" ? "text-red-500" : ""}>{event.message}</span>
           {status === "error" && reason && (
             <div className="mt-1 text-xs text-red-500/60 font-mono break-all">
               {reason}
@@ -237,10 +237,10 @@ function ImageResult({ event }: { event: { type: string; message: string; data?:
               {celebrities.map((celeb, idx) => (
                 <span
                   key={idx}
-                  className="inline-flex items-center gap-1 rounded-md bg-foreground/5 px-2 py-0.5 text-xs"
+                  className="inline-flex items-center gap-1 rounded-md bg-foreground/10 px-2 py-0.5 text-xs text-foreground/90"
                 >
                   {celeb.name}
-                  <span className="text-foreground/40">{Math.round(celeb.confidence)}%</span>
+                  <span className="text-foreground/60">{Math.round(celeb.confidence)}%</span>
                 </span>
               ))}
             </div>
@@ -307,7 +307,7 @@ function StepItem({ step }: { step: InvestigationStep }) {
             {step.title}
           </span>
           {step.message && (
-            <p className="text-xs text-foreground/50 mt-0.5">{step.message}</p>
+            <p className="text-xs text-foreground/70 mt-0.5">{step.message}</p>
           )}
         </div>
       </div>
@@ -343,6 +343,20 @@ function SegmentDetail({ segment }: { segment: InvestigationSegment }) {
         </div>
         <StatusLabel status={segment.status} />
       </div>
+
+      {/* Candidate reasoning - why this person was selected */}
+      {segment.candidateReasoning && (
+        <div className="rounded-lg bg-foreground/[0.03] border border-foreground/8 px-3 py-2.5 sm:px-4 sm:py-3">
+          <div className="flex items-start gap-2">
+            <span className="text-[10px] sm:text-xs font-medium text-foreground/50 uppercase tracking-wide shrink-0 mt-0.5">
+              Why
+            </span>
+            <p className="text-xs sm:text-sm text-foreground/80 leading-relaxed">
+              {segment.candidateReasoning}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Steps - always expanded */}
       {segment.steps.length > 0 && (

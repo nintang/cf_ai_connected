@@ -113,6 +113,8 @@ export interface InvestigationSegment {
   evidence?: EvidenceItem;
   startTime: number;
   endTime?: number;
+  /** Reasoning for why this candidate was selected (from LLM planner) */
+  candidateReasoning?: string;
 }
 
 export interface InvestigationState {

@@ -3,6 +3,7 @@ import { InvestigationEvent, EventsResponse } from '@visual-degrees/contracts';
 import { OpenRouterClient } from '@visual-degrees/integrations';
 import { getFullGraph, getGraphStats, findPath } from './graph-db';
 export { InvestigationWorkflow } from './workflows/investigation';
+export { GraphBroadcaster } from './durable-objects/graph-broadcaster';
 
 // Default allowed origins (fallback if env not set)
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -104,7 +105,14 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
-    
+
+    // GET /api/graph/ws - WebSocket upgrade for real-time graph updates
+    if (url.pathname === "/api/graph/ws" && request.headers.get("Upgrade") === "websocket") {
+      const id = env.GRAPH_BROADCASTER.idFromName("global");
+      const stub = env.GRAPH_BROADCASTER.get(id);
+      return stub.fetch(request);
+    }
+
     // POST /api/chat/parse - Parse a natural language query using AI
     if (url.pathname === "/api/chat/parse" && request.method === "POST") {
       try {
@@ -448,7 +456,7 @@ export default {
     }
 
     return new Response(JSON.stringify({
-      service: "Visual Degrees Worker",
+      service: "Connected? Worker",
       version: "1.0.0",
       endpoints: [
         "POST /api/chat/parse",
@@ -458,7 +466,8 @@ export default {
         "GET /api/chat/status/:instanceId",
         "GET /api/graph",
         "GET /api/graph/stats",
-        "GET /api/graph/path?from=Person+A&to=Person+B"
+        "GET /api/graph/path?from=Person+A&to=Person+B",
+        "GET /api/graph/ws (WebSocket)"
       ]
     }), {
       status: 200,

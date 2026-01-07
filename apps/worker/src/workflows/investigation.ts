@@ -24,6 +24,7 @@ import {
   calculatePathConfidence
 } from "@visual-degrees/core";
 import { upsertEdge } from "../graph-db";
+import type { GraphEdgeUpdate } from "../durable-objects/graph-broadcaster";
 
 interface Params {
   personA: string;
@@ -129,6 +130,23 @@ function createEventEmitter(kv: KVNamespace, runId: string) {
 }
 
 export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
+  /**
+   * Broadcast a new edge to all connected WebSocket clients
+   */
+  private async broadcastEdge(edge: GraphEdgeUpdate): Promise<void> {
+    try {
+      const id = this.env.GRAPH_BROADCASTER.idFromName("global");
+      const stub = this.env.GRAPH_BROADCASTER.get(id);
+      await stub.fetch(new Request("https://internal/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edge),
+      }));
+    } catch {
+      // Broadcasting is non-critical - don't fail the workflow if it fails
+    }
+  }
+
   async run(event: WorkflowEvent<Params>, step: WorkflowStep) {
     const { personA, personB, runId } = event.payload;
     const tools = getTools(this.env);
@@ -343,6 +361,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           directEdge.bestEvidence.thumbnailUrl,
           directEdge.bestEvidence.contextUrl
         );
+        // Broadcast to connected WebSocket clients
+        await this.broadcastEdge({
+          source: personA,
+          target: personB,
+          confidence: directEdge.edgeConfidence,
+          thumbnailUrl: directEdge.bestEvidence.thumbnailUrl,
+          contextUrl: directEdge.bestEvidence.contextUrl,
+        });
       } catch {
         // Failed to persist edge to graph DB - non-fatal
       }
@@ -798,6 +824,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             edgeToCandidate.bestEvidence.thumbnailUrl,
             edgeToCandidate.bestEvidence.contextUrl
           );
+          // Broadcast to connected WebSocket clients
+          await this.broadcastEdge({
+            source: currentFrontier,
+            target: candidateName,
+            confidence: edgeToCandidate.edgeConfidence,
+            thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
+            contextUrl: edgeToCandidate.bestEvidence.contextUrl,
+          });
         } catch {
           // Failed to persist edge to graph DB - non-fatal
         }
@@ -955,6 +989,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               bridgeEdge.bestEvidence.thumbnailUrl,
               bridgeEdge.bestEvidence.contextUrl
             );
+            // Broadcast to connected WebSocket clients
+            await this.broadcastEdge({
+              source: candidateName,
+              target: personB,
+              confidence: bridgeEdge.edgeConfidence,
+              thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
+              contextUrl: bridgeEdge.bestEvidence.contextUrl,
+            });
           } catch {
             // Failed to persist edge to graph DB - non-fatal
           }

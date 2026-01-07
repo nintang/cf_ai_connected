@@ -84,6 +84,7 @@ export interface EvidenceItem {
   from: string;
   to: string;
   thumbnailUrl: string;
+  evidenceUrl?: string; // Full-resolution image URL
   sourceUrl: string;
   confidence: number;
   description: string;

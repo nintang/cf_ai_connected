@@ -28,6 +28,7 @@ import type {
 import { createInitialState, STEP_TITLES } from "@/types/investigation"
 import {
   startInvestigation,
+  createWebSocketEventStream,
   createEventStream,
   parseQueryWithAI,
   findCachedPath,
@@ -405,36 +406,57 @@ export function InvestigationApp() {
       const response = await startInvestigation(personA, personB);
       const { runId } = response;
 
-      stopPollingRef.current = createEventStream(
-        runId,
-        (event) => {
-          // Process single event from SSE stream
-          setInvestigationState(prev => {
-            if (!prev) return prev;
-            return mapWorkerEventsToState([event], personA, personB, prev);
-          });
-        },
-        () => {
-          // Stream complete
-          setIsLoading(false);
-        },
-        (err) => {
-          console.error("Stream error:", err);
-          setInvestigationState(prev => {
-            if (!prev) return prev;
-            const errorLog: InvestigationEvent = {
-              type: "error",
-              message: `Error: ${err.message}`,
-              timestamp: Date.now()
-            };
-            return {
-              ...prev,
-              status: "failed" as const,
-              logs: [...prev.logs, errorLog]
-            };
-          });
-          setIsLoading(false);
+      // Event handler for processing stream events
+      const handleEvent = (event: WorkerEvent) => {
+        setInvestigationState(prev => {
+          if (!prev) return prev;
+          return mapWorkerEventsToState([event], personA, personB, prev);
+        });
+      };
+
+      // Completion handler
+      const handleComplete = () => {
+        setIsLoading(false);
+      };
+
+      // Error handler with SSE fallback
+      const handleError = (err: Error, isFallback = false) => {
+        if (!isFallback) {
+          // WebSocket failed - try SSE fallback
+          console.warn("WebSocket failed, falling back to SSE:", err.message);
+          stopPollingRef.current = createEventStream(
+            runId,
+            handleEvent,
+            handleComplete,
+            (sseErr) => handleError(sseErr, true)
+          );
+          return;
         }
+
+        // Both WebSocket and SSE failed
+        console.error("Stream error:", err);
+        setInvestigationState(prev => {
+          if (!prev) return prev;
+          const errorLog: InvestigationEvent = {
+            type: "error",
+            message: `Error: ${err.message}`,
+            timestamp: Date.now()
+          };
+          return {
+            ...prev,
+            status: "failed" as const,
+            logs: [...prev.logs, errorLog]
+          };
+        });
+        setIsLoading(false);
+      };
+
+      // Use WebSocket (Durable Objects) with SSE fallback
+      stopPollingRef.current = createWebSocketEventStream(
+        runId,
+        handleEvent,
+        handleComplete,
+        (err) => handleError(err, false)
       );
     } catch (err) {
       console.error("Failed to start investigation:", err);

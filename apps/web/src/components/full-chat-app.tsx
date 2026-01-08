@@ -52,6 +52,7 @@ import type {
 import { createInitialState, STEP_TITLES } from "@/types/investigation"
 import {
   startInvestigation,
+  createWebSocketEventStream,
   createEventStream,
   parseQueryWithAI,
   InvestigationEvent as WorkerEvent
@@ -490,59 +491,78 @@ function ChatContent() {
       const response = await startInvestigation(personA, personB);
       const { runId } = response;
 
-      // Start SSE stream for events
-      stopPollingRef.current = createEventStream(
-        runId,
-        (event) => {
-          // Update the last message with the new event
-          setChatMessages(prev => {
-            const lastMsg = prev[prev.length - 1];
-            if (lastMsg.role === "assistant" && lastMsg.investigationState) {
-              const newState = mapWorkerEventsToState(
-                [event],
-                personA,
-                personB,
-                lastMsg.investigationState
-              );
-              return [
-                ...prev.slice(0, -1),
-                { ...lastMsg, investigationState: newState }
-              ];
-            }
-            return prev;
-          });
-        },
-        () => {
-          // Stream complete
-          setIsLoading(false);
-        },
-        (error) => {
-          console.error("Stream error:", error);
-          // Update state to show error
-          setChatMessages(prev => {
-            const lastMsg = prev[prev.length - 1];
-            if (lastMsg.role === "assistant" && lastMsg.investigationState) {
-              const errorLog: InvestigationEvent = {
-                type: "error",
-                message: `Error: ${error.message}`,
-                timestamp: Date.now()
-              };
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...lastMsg,
-                  investigationState: {
-                    ...lastMsg.investigationState,
-                    status: "failed" as const,
-                    logs: [...lastMsg.investigationState.logs, errorLog]
-                  }
-                }
-              ];
-            }
-            return prev;
-          });
-          setIsLoading(false);
+      // Event handler for processing stream events
+      const handleEvent = (event: WorkerEvent) => {
+        setChatMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg.role === "assistant" && lastMsg.investigationState) {
+            const newState = mapWorkerEventsToState(
+              [event],
+              personA,
+              personB,
+              lastMsg.investigationState
+            );
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, investigationState: newState }
+            ];
+          }
+          return prev;
+        });
+      };
+
+      // Completion handler
+      const handleComplete = () => {
+        setIsLoading(false);
+      };
+
+      // Error handler with SSE fallback
+      const handleError = (error: Error, isFallback = false) => {
+        if (!isFallback) {
+          // WebSocket failed - try SSE fallback
+          console.warn("WebSocket failed, falling back to SSE:", error.message);
+          stopPollingRef.current = createEventStream(
+            runId,
+            handleEvent,
+            handleComplete,
+            (sseErr) => handleError(sseErr, true)
+          );
+          return;
         }
+
+        // Both WebSocket and SSE failed
+        console.error("Stream error:", error);
+        setChatMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg.role === "assistant" && lastMsg.investigationState) {
+            const errorLog: InvestigationEvent = {
+              type: "error",
+              message: `Error: ${error.message}`,
+              timestamp: Date.now()
+            };
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...lastMsg,
+                investigationState: {
+                  ...lastMsg.investigationState,
+                  status: "failed" as const,
+                  logs: [...lastMsg.investigationState.logs, errorLog]
+                }
+              }
+            ];
+          }
+          return prev;
+        });
+        setIsLoading(false);
+      };
+
+      // Use WebSocket (Durable Objects) with SSE fallback
+      stopPollingRef.current = createWebSocketEventStream(
+        runId,
+        handleEvent,
+        handleComplete,
+        (err) => handleError(err, false)
       );
     } catch (error) {
       console.error("Failed to start investigation:", error);

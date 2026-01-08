@@ -49,9 +49,14 @@ const EVENT_INDEX_PADDING = 6;  // Supports up to 999,999 events per run
 const EVENT_TTL_SECONDS = 3600; // 1 hour expiration
 
 /**
- * Creates an event emitter that stores events in KV
+ * Creates an event emitter that broadcasts events via Durable Object
+ * and optionally persists to KV for debugging/fallback
  */
-function createEventEmitter(kv: KVNamespace, runId: string) {
+function createEventEmitter(
+  env: Env,
+  runId: string,
+  options: { persistToKV?: boolean } = { persistToKV: false }
+) {
   let eventIndex = 0;
   let currentStepNumber = 0;
 
@@ -74,30 +79,38 @@ function createEventEmitter(kv: KVNamespace, runId: string) {
       },
     };
 
-    // Store event with sequential key for ordering
-    // Order: write event first (invisible to readers), then update count (makes it visible)
-    // This ensures readers never see a count pointing to a non-existent event
-    const key = eventId;
     const nextIndex = eventIndex + 1;
 
+    // Primary: Emit to Durable Object for real-time WebSocket streaming
     try {
-      // Step 1: Write the event (not visible to readers until count updated)
-      await kv.put(key, JSON.stringify(event), {
-        expirationTtl: EVENT_TTL_SECONDS,
-      });
-
-      // Step 2: Update the count (makes the event visible to readers)
-      await kv.put(`${runId}:count`, String(nextIndex), {
-        expirationTtl: EVENT_TTL_SECONDS,
-      });
-
-      // Only increment if both writes succeeded
-      eventIndex = nextIndex;
+      const doId = env.INVESTIGATION_EVENTS_BROADCASTER.idFromName(runId);
+      const stub = env.INVESTIGATION_EVENTS_BROADCASTER.get(doId);
+      await stub.fetch(new Request("https://internal/emit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      }));
     } catch (error) {
-      console.error("[EventEmitter] Failed to persist event:", error instanceof Error ? error.message : error);
-      // Still increment to avoid duplicate keys, but log the failure
-      eventIndex = nextIndex;
+      console.error("[EventEmitter] DO broadcast failed:", error instanceof Error ? error.message : error);
+      // Fall through to KV backup if enabled
     }
+
+    // Secondary (optional): Persist to KV for debugging/fallback SSE endpoint
+    if (options.persistToKV) {
+      try {
+        const key = eventId;
+        await env.INVESTIGATION_EVENTS.put(key, JSON.stringify(event), {
+          expirationTtl: EVENT_TTL_SECONDS,
+        });
+        await env.INVESTIGATION_EVENTS.put(`${runId}:count`, String(nextIndex), {
+          expirationTtl: EVENT_TTL_SECONDS,
+        });
+      } catch (error) {
+        console.warn("[EventEmitter] KV persistence failed:", error instanceof Error ? error.message : error);
+      }
+    }
+
+    eventIndex = nextIndex;
   };
 
   return {
@@ -170,7 +183,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     const tools = getTools(this.env);
 
     // Create event emitter with step helpers
-    const { emit, startStep: rawStartStep, updateStep, completeStep: rawCompleteStep } = createEventEmitter(this.env.INVESTIGATION_EVENTS, runId);
+    // Events are broadcast via Durable Object WebSocket; KV persistence disabled for performance
+    const { emit, startStep: rawStartStep, updateStep, completeStep: rawCompleteStep } = createEventEmitter(this.env, runId);
 
     // Track currently running step to ensure it's completed before no_path
     let currentRunningStep: InvestigationStepId | null = null;

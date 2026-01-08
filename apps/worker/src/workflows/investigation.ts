@@ -170,7 +170,39 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     const tools = getTools(this.env);
 
     // Create event emitter with step helpers
-    const { emit, startStep, updateStep, completeStep } = createEventEmitter(this.env.INVESTIGATION_EVENTS, runId);
+    const { emit, startStep: rawStartStep, updateStep, completeStep: rawCompleteStep } = createEventEmitter(this.env.INVESTIGATION_EVENTS, runId);
+
+    // Track currently running step to ensure it's completed before no_path
+    let currentRunningStep: InvestigationStepId | null = null;
+
+    // Wrap startStep to track running step
+    const startStep = async (
+      stepId: InvestigationStepId,
+      customTitle?: string,
+      extraData?: Partial<InvestigationEvent["data"]>
+    ) => {
+      currentRunningStep = stepId;
+      await rawStartStep(stepId, customTitle, extraData);
+    };
+
+    // Wrap completeStep to clear running step
+    const completeStep = async (
+      stepId: InvestigationStepId,
+      success: boolean,
+      message: string,
+      extraData?: Partial<InvestigationEvent["data"]>
+    ) => {
+      currentRunningStep = null;
+      await rawCompleteStep(stepId, success, message, extraData);
+    };
+
+    // Helper to complete any running step before final events
+    const completeRunningStepIfAny = async (reason: string) => {
+      if (currentRunningStep) {
+        await rawCompleteStep(currentRunningStep, false, reason);
+        currentRunningStep = null;
+      }
+    };
 
     // Input validation
     const trimmedA = personA?.trim() ?? "";
@@ -248,10 +280,19 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     // Helper to check budget - returns true if we can continue
     const checkBudget = () => {
       return (
-        state.budgets.searchCallsUsed < state.budgets.maxSearchCalls &&
-        state.budgets.rekognitionCallsUsed < state.budgets.maxRekognitionCalls &&
-        state.budgets.llmCallsUsed < state.budgets.maxLLMCalls
+        state.budgets.stepsUsed < state.budgets.maxSteps &&
+        state.budgets.subrequestsUsed < state.budgets.maxSubrequests
       );
+    };
+
+    // Helper to track subrequests - call before EVERY external API call
+    const trackSubrequest = (count: number = 1) => {
+      state.budgets.subrequestsUsed += count;
+    };
+
+    // Helper to increment step counter
+    const incrementStep = () => {
+      state.budgets.stepsUsed++;
     };
 
     // Emit initial status
@@ -275,8 +316,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     const directEdge = await step.do("direct-attempt", async () => {
       const query = directQuery(personA, personB);
-      state.budgets.searchCallsUsed++;
-      
+      trackSubrequest(); // Google Image Search
+
       try {
         const searchRes = await searchImages({ query });
         const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
@@ -287,10 +328,12 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           if (!checkBudget()) break;
 
           try {
-            // Visual check
+            // Visual check (LLM call)
+            trackSubrequest();
             const visual = await verifyCopresence({ imageUrl: img.imageUrl });
             if (!visual.isValidScene) {
               // Don't count collages - just emit without incrementing
+              trackSubrequest(2); // KV emit = 2 writes
               await emit("image_result", `Collage - ${visual.reason}`, {
                 imageUrl: img.thumbnailUrl,
                 status: "collage",
@@ -303,7 +346,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             validImageIndex++;
 
             // Detect celebrities with Rekognition
-            state.budgets.rekognitionCallsUsed++;
+            trackSubrequest(); // AWS Rekognition
             const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
             if (isValidEvidence(analysis.celebrities, personA, personB, DEFAULT_CONFIG.confidenceThreshold)) {
@@ -311,12 +354,14 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               if (record) {
                 evidence.push(record);
                 const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                trackSubrequest(2); // KV emit
                 await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${personA} & ${personB}`, {
                   imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
                   status: "evidence",
                   celebrities: celebs,
                 });
+                break; // Early exit - evidence found!
               }
             } else {
               // Rekognition didn't find a match - try AI verification as fallback
@@ -324,6 +369,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
               // Try AI verification (with error handling - don't fail if AI is unavailable)
               try {
+                trackSubrequest(); // LLM AI verification
                 const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA, personB });
 
                 if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
@@ -342,6 +388,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     imageScore: aiVerification.overallConfidence,
                   };
                   evidence.push(aiRecord);
+                  trackSubrequest(2); // KV emit
                   await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${personA} & ${personB}`, {
                     imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
@@ -353,7 +400,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     aiVerified: true,
                     aiNotes: aiVerification.notes,
                   });
+                  break; // Early exit - evidence found!
                 } else {
+                  trackSubrequest(2); // KV emit
                   await emit("image_result", `[${validImageIndex}] No match`, {
                     imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
@@ -363,6 +412,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 }
               } catch (aiError) {
                 // AI verification failed - just report no match (don't fail the whole process)
+                trackSubrequest(2); // KV emit
                 await emit("image_result", `[${validImageIndex}] No match`, {
                   imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
@@ -373,6 +423,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             }
           } catch (imgError) {
             // Don't count errors - just emit without incrementing
+            trackSubrequest(2); // KV emit
             await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
               imageUrl: img.thumbnailUrl,
               status: "error",
@@ -402,6 +453,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           from: personA,
           to: personB,
           confidence: directEdge.edgeConfidence,
+          evidenceUrl: directEdge.bestEvidence.imageUrl, // HD image
           thumbnailUrl: directEdge.bestEvidence.thumbnailUrl,
           contextUrl: directEdge.bestEvidence.contextUrl,
         },
@@ -423,6 +475,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           source: personA,
           target: personB,
           confidence: directEdge.edgeConfidence,
+          evidenceUrl: directEdge.bestEvidence.imageUrl, // HD image
           thumbnailUrl: directEdge.bestEvidence.thumbnailUrl,
           contextUrl: directEdge.bestEvidence.contextUrl,
         });
@@ -458,7 +511,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     // Get LLM suggestions for bridge candidates
     const suggestedBridges = await step.do("suggest-bridges", async () => {
-      state.budgets.llmCallsUsed++;
+      trackSubrequest(); // LLM call
       return await planner.suggestBridgeCandidates(personA, personB);
     });
 
@@ -537,7 +590,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         // No more candidates at this level, continue backtracking
       }
 
-      await emit("thinking", "Search exhausted - no more paths to explore");
+      await emit("status", `All paths exhausted - tried ${globalTriedCandidates.size} candidates, no more to explore`, {
+        budget: state.budgets,
+      });
       return false;
     };
 
@@ -579,8 +634,17 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         for (let i = 0; i < candidatesToTry.length; i++) {
           const candidateName = candidatesToTry[i];
 
-          // Mark as globally tried
+          // Check if we've exhausted our step budget
+          if (!checkBudget()) {
+            await emit("status", `Step budget exhausted (${state.budgets.stepsUsed}/${state.budgets.maxSteps} steps used)`, {
+              budget: state.budgets,
+            });
+            break;
+          }
+
+          // Mark as globally tried and increment step counter
           globalTriedCandidates.add(candidateName.toLowerCase());
+          incrementStep();
 
           // Verify bridge connection (same logic as main loop)
           await startStep("verify_bridge", `Verifying: ${currentFrontier} ↔ ${candidateName}`, {
@@ -599,7 +663,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
             for (const q of queries) {
               if (!checkBudget()) break;
-              state.budgets.searchCallsUsed++;
+              trackSubrequest(); // Google Image Search
 
               try {
                 const searchRes = await searchImages({ query: q });
@@ -609,8 +673,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   if (!checkBudget()) break;
 
                   try {
+                    trackSubrequest(); // LLM verifyCopresence
                     const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                     if (!visual.isValidScene) {
+                      trackSubrequest(2); // KV emit
                       await emit("image_result", `Collage - ${visual.reason}`, {
                         imageUrl: img.thumbnailUrl,
                         status: "collage",
@@ -620,7 +686,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
 
                     validImageIndex++;
-                    state.budgets.rekognitionCallsUsed++;
+                    trackSubrequest(); // AWS Rekognition
                     const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
                     if (isValidEvidence(analysis.celebrities, currentFrontier, candidateName, DEFAULT_CONFIG.confidenceThreshold)) {
@@ -628,16 +694,19 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                       if (record) {
                         evidence.push(record);
                         const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
                           status: "evidence",
                           celebrities: celebs,
                         });
+                        break; // Early exit - evidence found!
                       }
                     } else {
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
                       try {
+                        trackSubrequest(); // LLM AI verification
                         const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: currentFrontier, personB: candidateName });
                         if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
                           const aiRecord: EvidenceRecord = {
@@ -654,6 +723,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                             imageScore: aiVerification.overallConfidence,
                           };
                           evidence.push(aiRecord);
+                          trackSubrequest(2); // KV emit
                           await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
                             imageIndex: validImageIndex,
                             imageUrl: img.thumbnailUrl,
@@ -663,7 +733,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                               { name: candidateName, confidence: aiVerification.personBConfidence },
                             ],
                           });
+                          break; // Early exit - evidence found!
                         } else {
+                          trackSubrequest(2); // KV emit
                           await emit("image_result", `[${validImageIndex}] No match`, {
                             imageIndex: validImageIndex,
                             imageUrl: img.thumbnailUrl,
@@ -673,6 +745,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         }
                       } catch (aiError) {
                         console.warn("[Investigation] AI verification failed:", aiError instanceof Error ? aiError.message : aiError);
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -682,6 +755,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                       }
                     }
                   } catch (imgError) {
+                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "error",
@@ -730,6 +804,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               from: frame.frontier,
               to: candidateName,
               confidence: edgeToCandidate.edgeConfidence,
+              evidenceUrl: edgeToCandidate.bestEvidence.imageUrl,
               thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
               contextUrl: edgeToCandidate.bestEvidence.contextUrl,
             },
@@ -749,6 +824,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               source: frame.frontier,
               target: candidateName,
               confidence: edgeToCandidate.edgeConfidence,
+              evidenceUrl: edgeToCandidate.bestEvidence.imageUrl,
               thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
               contextUrl: edgeToCandidate.bestEvidence.contextUrl,
             });
@@ -777,7 +853,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
             for (const q of queries) {
               if (!checkBudget()) break;
-              state.budgets.searchCallsUsed++;
+              trackSubrequest(); // Google Image Search
               try {
                 const searchRes = await searchImages({ query: q });
                 const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
@@ -785,18 +861,23 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 for (const img of images) {
                   if (!checkBudget()) break;
                   try {
+                    trackSubrequest(); // LLM verifyCopresence
                     const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                     if (!visual.isValidScene) continue;
 
                     validImageIndex++;
-                    state.budgets.rekognitionCallsUsed++;
+                    trackSubrequest(); // AWS Rekognition
                     const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
                     if (isValidEvidence(analysis.celebrities, candidateName, personB, DEFAULT_CONFIG.confidenceThreshold)) {
                       const record = createEvidenceRecord(img, analysis, candidateName, personB);
-                      if (record) evidence.push(record);
+                      if (record) {
+                        evidence.push(record);
+                        break; // Early exit - evidence found!
+                      }
                     } else {
                       try {
+                        trackSubrequest(); // LLM AI verification
                         const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: candidateName, personB });
                         if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
                           evidence.push({
@@ -812,6 +893,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                             ],
                             imageScore: aiVerification.overallConfidence,
                           });
+                          break; // Early exit - evidence found!
                         }
                       } catch (aiError) {
                         // AI verification failed - continue
@@ -843,6 +925,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 from: candidateName,
                 to: personB,
                 confidence: bridgeEdge.edgeConfidence,
+                evidenceUrl: bridgeEdge.bestEvidence.imageUrl,
                 thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
                 contextUrl: bridgeEdge.bestEvidence.contextUrl,
               },
@@ -862,6 +945,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 source: candidateName,
                 target: personB,
                 confidence: bridgeEdge.edgeConfidence,
+                evidenceUrl: bridgeEdge.bestEvidence.imageUrl,
                 thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
                 contextUrl: bridgeEdge.bestEvidence.contextUrl,
               });
@@ -910,11 +994,12 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
       // If no suggestions yet for this frontier, ask AI
       if (currentBridges.length === 0 && checkBudget()) {
+        trackSubrequest(2); // KV emit
         await emit("thinking", `Asking AI for bridge candidates from ${currentFrontier} to ${personB}...`);
 
         const excludeList = Array.from(globalTriedCandidates);
         currentBridges = await step.do(`bridges-${dfsStack.length}-${currentFrontier}`, async () => {
-          state.budgets.llmCallsUsed++;
+          trackSubrequest(); // LLM call
           return await planner.suggestBridgeCandidates(currentFrontier, personB, excludeList);
         });
 
@@ -941,11 +1026,12 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
       // If no candidates available, ask LLM for more suggestions
       if (availableCandidates.length === 0 && checkBudget()) {
+        trackSubrequest(2); // KV emit
         await emit("thinking", `All candidates exhausted for ${currentFrontier}. Asking AI for more suggestions...`);
 
         const excludeList = Array.from(globalTriedCandidates);
         const additionalBridges = await step.do(`additional-bridges-${dfsStack.length}-${currentFrontier}`, async () => {
-          state.budgets.llmCallsUsed++;
+          trackSubrequest(); // LLM call
           return await planner.suggestBridgeCandidates(currentFrontier, personB, excludeList);
         });
 
@@ -988,7 +1074,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       await updateStep(`Analyzing candidates to find best path to ${personB}...`);
 
       const plan = await step.do(`plan-${dfsStack.length}-${currentFrontier}`, async () => {
-        state.budgets.llmCallsUsed++;
+        trackSubrequest(); // LLM call
         return await planner.selectNextExpansion({
           personA: state.personA,
           personB: state.personB,
@@ -997,9 +1083,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           hopLimit: DEFAULT_CONFIG.hopLimit,
           confidenceThreshold: DEFAULT_CONFIG.confidenceThreshold,
           budgets: {
-            searchCallsRemaining: state.budgets.maxSearchCalls - state.budgets.searchCallsUsed,
-            rekognitionCallsRemaining: state.budgets.maxRekognitionCalls - state.budgets.rekognitionCallsUsed,
-            llmCallsRemaining: state.budgets.maxLLMCalls - state.budgets.llmCallsUsed
+            stepsRemaining: state.budgets.maxSteps - state.budgets.stepsUsed,
+            subrequestsRemaining: state.budgets.maxSubrequests - state.budgets.subrequestsUsed,
           },
           verifiedEdges: state.verifiedEdges.map(e => ({ from: e.from, to: e.to, confidence: e.edgeConfidence })),
           failedCandidates: state.failedCandidates,
@@ -1049,8 +1134,17 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       for (let i = 0; i < candidatesToTry.length; i++) {
         const candidateName = candidatesToTry[i];
 
-        // Mark as globally tried
+        // Check if we've exhausted our step budget
+        if (!checkBudget()) {
+          await emit("status", `Step budget exhausted (${state.budgets.stepsUsed}/${state.budgets.maxSteps} steps used)`, {
+            budget: state.budgets,
+          });
+          break;
+        }
+
+        // Mark as globally tried and increment step counter
         globalTriedCandidates.add(candidateName.toLowerCase());
+        incrementStep();
 
         // ========================================================================
         // STEP 3: Verify Bridge Connection
@@ -1072,7 +1166,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
           for (const q of queries) {
             if (!checkBudget()) break;
-            state.budgets.searchCallsUsed++;
+            trackSubrequest(); // Google Image Search
 
             try {
               const searchRes = await searchImages({ query: q });
@@ -1082,8 +1176,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 if (!checkBudget()) break;
 
                 try {
+                  trackSubrequest(); // LLM verifyCopresence
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
+                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
@@ -1093,7 +1189,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   }
 
                   validImageIndex++;
-                  state.budgets.rekognitionCallsUsed++;
+                  trackSubrequest(); // AWS Rekognition
                   const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
                   if (isValidEvidence(analysis.celebrities, currentFrontier, candidateName, DEFAULT_CONFIG.confidenceThreshold)) {
@@ -1101,18 +1197,21 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "evidence",
                         celebrities: celebs,
                       });
+                      break; // Early exit - evidence found!
                     }
                   } else {
                     // AI fallback for verify_bridge
                     const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
 
                     try {
+                      trackSubrequest(); // LLM AI verification
                       const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: currentFrontier, personB: candidateName });
 
                       if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
@@ -1130,6 +1229,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           imageScore: aiVerification.overallConfidence,
                         };
                         evidence.push(aiRecord);
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1140,7 +1240,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           ],
                           aiVerified: true,
                         });
+                        break; // Early exit - evidence found!
                       } else {
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1149,6 +1251,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                       }
                     } catch (aiError) {
+                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] No match`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1158,6 +1261,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
+                  trackSubrequest(2); // KV emit
                   await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",
@@ -1166,7 +1270,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   continue;
                 }
               }
-            } catch (e) { continue; }
+            } catch (e) {
+              console.error(`[DEBUG] Verify search query failed:`, e instanceof Error ? e.message : String(e));
+              continue;
+            }
 
             // Stop searching once we find valid evidence - no need for multiple photos
             if (evidence.length >= 1) break;
@@ -1214,6 +1321,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             from: currentFrontier,
             to: candidateName,
             confidence: edgeToCandidate.edgeConfidence,
+            evidenceUrl: edgeToCandidate.bestEvidence.imageUrl,
             thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
             contextUrl: edgeToCandidate.bestEvidence.contextUrl,
           },
@@ -1235,6 +1343,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             source: currentFrontier,
             target: candidateName,
             confidence: edgeToCandidate.edgeConfidence,
+            evidenceUrl: edgeToCandidate.bestEvidence.imageUrl,
             thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
             contextUrl: edgeToCandidate.bestEvidence.contextUrl,
           });
@@ -1264,12 +1373,13 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
         const bridgeEdge = await step.do(`bridge-${dfsStack.length}-${candidateName}`, async () => {
           const queries = bridgeQueries(candidateName, personB);
-          const evidence = [];
+          const evidence: EvidenceRecord[] = [];
           let validImageIndex = 0;
+          console.log(`[DEBUG] Starting bridge search: ${candidateName} → ${personB}, queries: ${queries.length}`);
 
           for (const q of queries) {
             if (!checkBudget()) break;
-            state.budgets.searchCallsUsed++;
+            trackSubrequest(); // Google Image Search
             try {
               const searchRes = await searchImages({ query: q });
               const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
@@ -1278,8 +1388,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 if (!checkBudget()) break;
 
                 try {
+                  trackSubrequest(); // LLM verifyCopresence
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
+                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
@@ -1289,7 +1401,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   }
 
                   validImageIndex++;
-                  state.budgets.rekognitionCallsUsed++;
+                  trackSubrequest(); // AWS Rekognition
                   const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
 
                   if (isValidEvidence(analysis.celebrities, candidateName, personB, DEFAULT_CONFIG.confidenceThreshold)) {
@@ -1297,22 +1409,25 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${candidateName} & ${personB}`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
                         status: "evidence",
                         celebrities: celebs,
                       });
+                      break; // Early exit from images loop - evidence found!
                     }
                   } else {
                     // AI fallback for connect_target
                     const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
 
                     try {
+                      trackSubrequest(); // LLM AI verification
                       const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: candidateName, personB });
 
                       if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
-                        const aiRecord = {
+                        const aiRecord: EvidenceRecord = {
                           from: candidateName,
                           to: personB,
                           imageUrl: img.imageUrl,
@@ -1326,6 +1441,8 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           imageScore: aiVerification.overallConfidence,
                         };
                         evidence.push(aiRecord);
+                        console.log(`[DEBUG] AI Evidence found and pushed! evidence.length=${evidence.length}, confidence=${aiVerification.overallConfidence}`);
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${candidateName} & ${personB}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1336,7 +1453,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           ],
                           aiVerified: true,
                         });
+                        break; // Early exit from images loop - evidence found!
                       } else {
+                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1345,6 +1464,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                       }
                     } catch (aiError) {
+                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] No match`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1354,6 +1474,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
+                  trackSubrequest(2); // KV emit
                   await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",
@@ -1362,13 +1483,27 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   continue;
                 }
               }
-            } catch (e) { continue; }
+            } catch (e) {
+              console.error(`[DEBUG] Bridge search query failed:`, e instanceof Error ? e.message : String(e));
+              continue;
+            }
             // Stop searching once we find valid evidence - no need for multiple photos
-            if (evidence.length >= 1) break;
+            if (evidence.length >= 1) {
+              console.log(`[DEBUG] Breaking query loop - evidence.length=${evidence.length}`);
+              break;
+            }
           }
-          if (evidence.length > 0) return createVerifiedEdge(candidateName, personB, evidence);
+          console.log(`[DEBUG] After all queries - evidence.length=${evidence.length}`);
+          if (evidence.length > 0) {
+            const edge = createVerifiedEdge(candidateName, personB, evidence);
+            console.log(`[DEBUG] createVerifiedEdge returned: ${edge ? `edge with confidence ${edge.edgeConfidence}` : 'null'}`);
+            return edge;
+          }
+          console.log(`[DEBUG] Returning null - no evidence found`);
           return null;
         });
+
+        console.log(`[DEBUG] step.do returned bridgeEdge: ${bridgeEdge ? `found with confidence ${bridgeEdge.edgeConfidence}` : 'null'}`);
 
         if (bridgeEdge) {
           // SUCCESS! Found complete path to target
@@ -1380,6 +1515,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               from: candidateName,
               to: personB,
               confidence: bridgeEdge.edgeConfidence,
+              evidenceUrl: bridgeEdge.bestEvidence.imageUrl,
               thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
               contextUrl: bridgeEdge.bestEvidence.contextUrl,
             },
@@ -1401,6 +1537,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               source: candidateName,
               target: personB,
               confidence: bridgeEdge.edgeConfidence,
+              evidenceUrl: bridgeEdge.bestEvidence.imageUrl,
               thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
               contextUrl: bridgeEdge.bestEvidence.contextUrl,
             });
@@ -1447,6 +1584,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     }
 
     const result = this.finalizeFailure(state);
+
+    // Ensure any running step is completed before emitting no_path
+    await completeRunningStepIfAny("Investigation ended - no path found");
+
     await emit("no_path", `Investigation complete. No verified connection found within ${DEFAULT_CONFIG.hopLimit} degrees. Try again or search for different people!`, {
       path: state.path,
       hopDepth: state.hopDepth,

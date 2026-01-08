@@ -1552,6 +1552,31 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       if (!foundValidEdge) {
         // All candidates at this level failed verification
         await completeStep("find_bridges", false, "All candidates failed verification");
+
+        // If we're at hop 0 (no verified edges yet), try to get more candidates instead of giving up
+        if (dfsStack.length === 0 && checkBudget()) {
+          await emit("thinking", `All initial candidates failed. Asking AI for more suggestions...`);
+
+          const excludeList = Array.from(globalTriedCandidates);
+          const moreBridges = await step.do(`more-bridges-${Date.now()}`, async () => {
+            trackSubrequest(); // LLM call
+            return await planner.suggestBridgeCandidates(currentFrontier, personB, excludeList);
+          });
+
+          // Filter out already tried candidates
+          const newCandidates = moreBridges.filter(
+            (s) => !globalTriedCandidates.has(s.name.toLowerCase())
+          );
+
+          if (newCandidates.length > 0) {
+            await emit("thinking", `Found ${newCandidates.length} new candidate(s): ${newCandidates.slice(0, 3).map(c => c.name).join(", ")}...`);
+            // Set these as pending candidates for the next iteration
+            pendingCandidatesToTry = newCandidates.map(c => c.name);
+            useRemainingCandidates = true;
+            continue; // Continue the main loop with new candidates
+          }
+        }
+
         if (!await backtrack()) break;
         currentFrontier = state.frontier;
       }

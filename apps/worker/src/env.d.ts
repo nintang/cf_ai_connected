@@ -6,6 +6,7 @@ export interface Env {
   RATE_LIMIT: KVNamespace;
   GRAPH_DB: D1Database;
   GRAPH_BROADCASTER: DurableObjectNamespace;
+  INVESTIGATION_EVENTS_BROADCASTER: DurableObjectNamespace;
 
   // Environment variables
   AWS_REGION: string;

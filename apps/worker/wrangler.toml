@@ -35,15 +35,20 @@ binding = "GRAPH_DB"
 database_name = "visual-degrees-graph"
 database_id = "e06f45af-8e0b-4bf2-a42b-f202f71112b7"
 
-# Durable Objects for WebSocket graph updates
+# Durable Objects for WebSocket updates
 [durable_objects]
 bindings = [
-  { name = "GRAPH_BROADCASTER", class_name = "GraphBroadcaster" }
+  { name = "GRAPH_BROADCASTER", class_name = "GraphBroadcaster" },
+  { name = "INVESTIGATION_EVENTS_BROADCASTER", class_name = "InvestigationEventsBroadcaster" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GraphBroadcaster"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["InvestigationEventsBroadcaster"]
 
 [observability]
 enabled = true

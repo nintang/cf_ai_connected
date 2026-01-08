@@ -5,6 +5,7 @@ import { getFullGraph, getGraphStats, findPath } from './graph-db';
 import { searchImages } from './tools/search';
 export { InvestigationWorkflow } from './workflows/investigation';
 export { GraphBroadcaster } from './durable-objects/graph-broadcaster';
+export { InvestigationEventsBroadcaster } from './durable-objects/investigation-events-broadcaster';
 
 // Default allowed origins (fallback if env not set)
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -135,6 +136,30 @@ export default {
       const id = env.GRAPH_BROADCASTER.idFromName("global");
       const stub = env.GRAPH_BROADCASTER.get(id);
       return stub.fetch(request);
+    }
+
+    // GET /api/chat/ws/:runId - WebSocket upgrade for real-time investigation events
+    // Uses per-runId Durable Object instances for event streaming (no subrequest limits)
+    if (url.pathname.startsWith("/api/chat/ws/") && request.headers.get("Upgrade") === "websocket") {
+      const runId = url.pathname.split("/").pop();
+      if (!runId) {
+        return new Response(JSON.stringify({ error: "Missing runId" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      // Route to per-runId Durable Object
+      const id = env.INVESTIGATION_EVENTS_BROADCASTER.idFromName(runId);
+      const stub = env.INVESTIGATION_EVENTS_BROADCASTER.get(id);
+
+      // Forward cursor param if present (for replay from specific point)
+      const cursor = url.searchParams.get("cursor");
+      const doUrl = cursor
+        ? `https://internal/ws?cursor=${cursor}`
+        : "https://internal/ws";
+
+      return stub.fetch(new Request(doUrl, request));
     }
 
     // POST /api/chat/parse - Parse a natural language query using AI

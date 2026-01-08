@@ -25,6 +25,11 @@ import { useState, useEffect } from "react";
 // shadcn components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  EvidenceCarouselOverlay,
+  EvidencePlayButton,
+  type EvidenceSlide,
+} from "@/components/ui/evidence-carousel";
 
 interface InvestigationTrackerProps {
   state: InvestigationState;
@@ -493,6 +498,9 @@ function EvidenceCard({ hop, evidence, isIntermediary }: {
 
 // Final path with evidence photos
 function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evidence: EvidenceItem[] }) {
+  const [carouselOpen, setCarouselOpen] = useState(false);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+
   if (path.length === 0) return null;
 
   const names = [path[0].from, ...path.map((p) => p.to)];
@@ -505,40 +513,80 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
     );
   };
 
+  // Build slides for carousel from path evidence
+  const carouselSlides: EvidenceSlide[] = [];
+  for (const hop of path) {
+    const evidenceItem = getEvidenceForHop(hop.from, hop.to);
+    if (evidenceItem?.thumbnailUrl) {
+      carouselSlides.push({
+        from: hop.from,
+        to: hop.to,
+        thumbnailUrl: evidenceItem.thumbnailUrl,
+        evidenceUrl: evidenceItem.evidenceUrl,
+        sourceUrl: evidenceItem.sourceUrl,
+        confidence: hop.confidence,
+      });
+    }
+  }
+
   return (
-    <div className="space-y-3 sm:space-y-4">
-      {/* Compact path overview */}
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-        {names.map((name, idx) => (
-          <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
-            <div className={cn(
-              "rounded-md px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none",
-              (idx === 0 || idx === names.length - 1) && "bg-foreground text-background",
-              idx > 0 && idx < names.length - 1 && "border border-foreground/20 text-foreground"
-            )}>
-              {name}
-            </div>
-            {idx < names.length - 1 && (
-              <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
-            )}
+    <>
+      <div className="space-y-3 sm:space-y-4">
+        {/* Header with play button */}
+        <div className="flex items-center justify-between gap-2">
+          {/* Compact path overview */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {names.map((name, idx) => (
+              <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
+                <div className={cn(
+                  "rounded-md px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none",
+                  (idx === 0 || idx === names.length - 1) && "bg-foreground text-background",
+                  idx > 0 && idx < names.length - 1 && "border border-foreground/20 text-foreground"
+                )}>
+                  {name}
+                </div>
+                {idx < names.length - 1 && (
+                  <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+
+          {/* Play button for carousel */}
+          {carouselSlides.length > 0 && (
+            <EvidencePlayButton
+              onClick={() => {
+                setCarouselIndex(0);
+                setCarouselOpen(true);
+              }}
+              count={carouselSlides.length}
+            />
+          )}
+        </div>
+
+        {/* Evidence photos for each hop */}
+        {path.length > 0 && (
+          <div className="flex flex-wrap gap-2 sm:gap-3 pt-1 sm:pt-2">
+            {path.map((hop, idx) => (
+              <EvidenceCard
+                key={idx}
+                hop={hop}
+                evidence={getEvidenceForHop(hop.from, hop.to)}
+                isIntermediary={idx > 0 && idx < path.length - 1}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Evidence photos for each hop */}
-      {path.length > 0 && (
-        <div className="flex flex-wrap gap-2 sm:gap-3 pt-1 sm:pt-2">
-          {path.map((hop, idx) => (
-            <EvidenceCard
-              key={idx}
-              hop={hop}
-              evidence={getEvidenceForHop(hop.from, hop.to)}
-              isIntermediary={idx > 0 && idx < path.length - 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+      {/* Evidence Carousel Overlay */}
+      <EvidenceCarouselOverlay
+        slides={carouselSlides}
+        open={carouselOpen}
+        onOpenChange={setCarouselOpen}
+        initialIndex={carouselIndex}
+      />
+    </>
   );
 }
 

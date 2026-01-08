@@ -317,8 +317,8 @@ export function EvidencePlayButton({ onClick, count, className }: PlayButtonProp
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-full",
-        "bg-foreground text-background hover:bg-foreground/90",
-        "transition-all duration-200 hover:scale-105 active:scale-95",
+        "bg-orange-500 text-white hover:bg-orange-600",
+        "transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm",
         className
       )}
     >

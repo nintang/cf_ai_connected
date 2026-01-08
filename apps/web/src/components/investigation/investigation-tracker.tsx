@@ -531,29 +531,10 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
 
   return (
     <>
-      <div className="space-y-3 sm:space-y-4">
-        {/* Header with play button */}
-        <div className="flex items-center justify-between gap-2">
-          {/* Compact path overview */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            {names.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
-                <div className={cn(
-                  "rounded-md px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none",
-                  (idx === 0 || idx === names.length - 1) && "bg-foreground text-background",
-                  idx > 0 && idx < names.length - 1 && "border border-foreground/20 text-foreground"
-                )}>
-                  {name}
-                </div>
-                {idx < names.length - 1 && (
-                  <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Play button for carousel */}
-          {carouselSlides.length > 0 && (
+      <div className="relative space-y-3 sm:space-y-4">
+        {/* Play button at top right */}
+        {carouselSlides.length > 0 && (
+          <div className="absolute -top-1 right-0">
             <EvidencePlayButton
               onClick={() => {
                 setCarouselIndex(0);
@@ -561,7 +542,25 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
               }}
               count={carouselSlides.length}
             />
-          )}
+          </div>
+        )}
+
+        {/* Compact path overview */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pr-24 sm:pr-28">
+          {names.map((name, idx) => (
+            <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
+              <div className={cn(
+                "rounded-md px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none",
+                (idx === 0 || idx === names.length - 1) && "bg-foreground text-background",
+                idx > 0 && idx < names.length - 1 && "border border-foreground/20 text-foreground"
+              )}>
+                {name}
+              </div>
+              {idx < names.length - 1 && (
+                <ArrowRight size={12} className="text-foreground/30 shrink-0 sm:size-[14px]" />
+              )}
+            </div>
+          ))}
         </div>
 
         {/* Evidence photos for each hop */}

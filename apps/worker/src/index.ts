@@ -1,7 +1,8 @@
 import { Env } from './env';
 import { InvestigationEvent, EventsResponse } from '@visual-degrees/contracts';
-import { OpenRouterClient } from '@visual-degrees/integrations';
+import { OpenRouterClient, CelebrityRekognitionClient } from '@visual-degrees/integrations';
 import { getFullGraph, getGraphStats, findPath } from './graph-db';
+import { searchImages } from './tools/search';
 export { InvestigationWorkflow } from './workflows/investigation';
 export { GraphBroadcaster } from './durable-objects/graph-broadcaster';
 
@@ -12,9 +13,12 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3001",
 ];
 
-// Rate limit: 10 searches per hour per IP
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW = 60 * 60; // 1 hour in seconds
+// Rate limit: 50 searches per day per IP
+const RATE_LIMIT_MAX = 50;
+const RATE_LIMIT_WINDOW = 24 * 60 * 60; // 24 hours in seconds
+
+// Whitelisted IPs (unlimited access) - set via env variable WHITELISTED_IPS
+const WHITELISTED_IPS = new Set<string>();
 
 /**
  * Get allowed origins from env or use defaults
@@ -42,6 +46,21 @@ function getCorsHeaders(request: Request, env: Env): Record<string, string> {
 }
 
 /**
+ * Check if IP is whitelisted (from env variable)
+ */
+function isWhitelisted(env: Env, ip: string): boolean {
+  // Check hardcoded set first
+  if (WHITELISTED_IPS.has(ip)) return true;
+
+  // Check env variable (comma-separated IPs)
+  if (env.WHITELISTED_IPS) {
+    const envWhitelist = env.WHITELISTED_IPS.split(",").map((i: string) => i.trim());
+    return envWhitelist.includes(ip);
+  }
+  return false;
+}
+
+/**
  * Check rate limit for an IP address
  * Returns { allowed: boolean, remaining: number, resetAt: number }
  */
@@ -49,6 +68,11 @@ async function checkRateLimit(
   env: Env,
   ip: string
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  // Whitelisted IPs bypass rate limiting
+  if (isWhitelisted(env, ip)) {
+    return { allowed: true, remaining: 999999, resetAt: 0 };
+  }
+
   const key = `ratelimit:${ip}`;
   const now = Math.floor(Date.now() / 1000);
 
@@ -156,7 +180,7 @@ export default {
         if (!rateLimit.allowed) {
           const resetDate = new Date(rateLimit.resetAt * 1000);
           return new Response(JSON.stringify({
-            error: "Rate limit exceeded. You can perform 10 searches per hour.",
+            error: "Rate limit exceeded. You can perform 50 searches per day.",
             remaining: 0,
             resetAt: resetDate.toISOString(),
           }), {
@@ -230,6 +254,8 @@ export default {
           const encoder = new TextEncoder();
           let cursor = 0;
           let isComplete = false;
+          const streamStartTime = Date.now();
+          const MAX_STREAM_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
 
           const sendEvent = (event: InvestigationEvent) => {
             const data = `data: ${JSON.stringify(event)}\n\n`;
@@ -238,6 +264,20 @@ export default {
 
           // Poll for new events and stream them
           while (!isComplete) {
+            // Check for stream timeout
+            if (Date.now() - streamStartTime > MAX_STREAM_DURATION_MS) {
+              const timeoutEvent = {
+                type: "error" as const,
+                runId,
+                timestamp: new Date().toISOString(),
+                message: "Stream exceeded maximum duration (10 minutes)",
+                data: { category: "TIMEOUT" as const }
+              };
+              sendEvent(timeoutEvent);
+              isComplete = true;
+              break;
+            }
+
             try {
               const countStr = await env.INVESTIGATION_EVENTS.get(`${runId}:count`);
               const count = countStr ? parseInt(countStr, 10) : 0;
@@ -257,6 +297,7 @@ export default {
                     }
                   } catch {
                     // Skip malformed events
+                    console.warn(`[SSE] Malformed event at ${key}`);
                   }
                 }
               }
@@ -269,6 +310,7 @@ export default {
               }
             } catch (error) {
               // Send error event and close
+              console.error("[SSE] Stream error:", error instanceof Error ? error.message : error);
               const errorEvent = {
                 type: "error" as const,
                 runId,
@@ -420,6 +462,93 @@ export default {
       }
     }
 
+    // GET /api/health - Test all external services
+    if (url.pathname === "/api/health" && request.method === "GET") {
+      const results: Record<string, { ok: boolean; message: string; latency?: number }> = {};
+
+      // Test 1: Google Custom Search API
+      try {
+        const start = Date.now();
+        const searchFn = searchImages(env);
+        const searchResult = await searchFn({ query: "Elon Musk" });
+        const latency = Date.now() - start;
+        results.googleSearch = {
+          ok: searchResult.results && searchResult.results.length > 0,
+          message: `Found ${searchResult.results?.length || 0} images`,
+          latency,
+        };
+      } catch (e) {
+        results.googleSearch = {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+
+      // Test 2: AWS Rekognition
+      try {
+        const start = Date.now();
+        const rekognitionClient = new CelebrityRekognitionClient({
+          region: env.AWS_REGION || "us-east-1",
+          accessKeyId: env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+        });
+        // Use a well-known public image of a celebrity
+        const testImageUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/34/Elon_Musk_Royal_Society_%28crop2%29.jpg/440px-Elon_Musk_Royal_Society_%28crop2%29.jpg";
+        const rekResult = await rekognitionClient.detectCelebrities(testImageUrl);
+        const latency = Date.now() - start;
+        const foundElon = rekResult.celebrities?.some((c: { name: string }) =>
+          c.name.toLowerCase().includes("elon") || c.name.toLowerCase().includes("musk")
+        );
+        results.awsRekognition = {
+          ok: rekResult.celebrities && rekResult.celebrities.length > 0,
+          message: foundElon
+            ? `Detected ${rekResult.celebrities.length} celebrities including Elon Musk`
+            : `Detected ${rekResult.celebrities?.length || 0} celebrities (Elon not found)`,
+          latency,
+        };
+      } catch (e) {
+        results.awsRekognition = {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+
+      // Test 3: OpenRouter (Gemini)
+      try {
+        const start = Date.now();
+        const openRouterClient = new OpenRouterClient({
+          apiKey: env.OPENROUTER_API_KEY,
+          model: "google/gemini-2.0-flash-001",
+        });
+        const parseResult = await openRouterClient.parseQuery("Elon Musk to Beyonce");
+        const latency = Date.now() - start;
+        results.openRouter = {
+          ok: parseResult.isValid && !!parseResult.personA && !!parseResult.personB,
+          message: parseResult.isValid
+            ? `Parsed: ${parseResult.personA} → ${parseResult.personB}`
+            : `Failed to parse: ${parseResult.reason || "unknown"}`,
+          latency,
+        };
+      } catch (e) {
+        results.openRouter = {
+          ok: false,
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
+
+      // Overall status
+      const allOk = Object.values(results).every(r => r.ok);
+
+      return new Response(JSON.stringify({
+        status: allOk ? "healthy" : "degraded",
+        services: results,
+        timestamp: new Date().toISOString(),
+      }, null, 2), {
+        status: allOk ? 200 : 503,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
+    }
+
     // GET /api/graph/path - Find shortest path between two people (cached lookup)
     if (url.pathname === "/api/graph/path" && request.method === "GET") {
       try {
@@ -459,6 +588,7 @@ export default {
       service: "Connected? Worker",
       version: "1.0.0",
       endpoints: [
+        "GET /api/health",
         "POST /api/chat/parse",
         "POST /api/chat/query",
         "GET /api/chat/stream/:runId (SSE)",

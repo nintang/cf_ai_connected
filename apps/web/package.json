@@ -9,7 +9,7 @@
     "lint": "eslint",
     "build:worker": "npx opennextjs-cloudflare build",
     "preview": "npx opennextjs-cloudflare build && npx opennextjs-cloudflare preview",
-    "deploy": "NEXT_PUBLIC_WORKER_URL=https://visual-degrees-worker.nintang48.workers.dev npx opennextjs-cloudflare build && npx opennextjs-cloudflare deploy"
+    "deploy": "NEXT_PUBLIC_WORKER_URL=https://vd.nintang48.workers.dev npx opennextjs-cloudflare build && npx opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",

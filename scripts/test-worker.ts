@@ -1,7 +1,7 @@
 import chalk from "chalk";
 
 async function main() {
-  const workerUrl = "https://visual-degrees-worker.nintang48.workers.dev"; // Production URL
+  const workerUrl = "https://vd.nintang48.workers.dev"; // Production URL
   const personA = process.argv[2] || "Donald Trump";
   const personB = process.argv[3] || "Kanye West";
 

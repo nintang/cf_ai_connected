@@ -333,7 +333,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             const visual = await verifyCopresence({ imageUrl: img.imageUrl });
             if (!visual.isValidScene) {
               // Don't count collages - just emit without incrementing
-              trackSubrequest(2); // KV emit = 2 writes
               await emit("image_result", `Collage - ${visual.reason}`, {
                 imageUrl: img.thumbnailUrl,
                 status: "collage",
@@ -354,7 +353,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               if (record) {
                 evidence.push(record);
                 const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                trackSubrequest(2); // KV emit
                 await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${personA} & ${personB}`, {
                   imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
@@ -388,7 +386,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     imageScore: aiVerification.overallConfidence,
                   };
                   evidence.push(aiRecord);
-                  trackSubrequest(2); // KV emit
                   await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${personA} & ${personB}`, {
                     imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
@@ -402,7 +399,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   });
                   break; // Early exit - evidence found!
                 } else {
-                  trackSubrequest(2); // KV emit
                   await emit("image_result", `[${validImageIndex}] No match`, {
                     imageIndex: validImageIndex,
                     imageUrl: img.thumbnailUrl,
@@ -412,7 +408,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                 }
               } catch (aiError) {
                 // AI verification failed - just report no match (don't fail the whole process)
-                trackSubrequest(2); // KV emit
                 await emit("image_result", `[${validImageIndex}] No match`, {
                   imageIndex: validImageIndex,
                   imageUrl: img.thumbnailUrl,
@@ -423,7 +418,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             }
           } catch (imgError) {
             // Don't count errors - just emit without incrementing
-            trackSubrequest(2); // KV emit
             await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
               imageUrl: img.thumbnailUrl,
               status: "error",
@@ -676,7 +670,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     trackSubrequest(); // LLM verifyCopresence
                     const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                     if (!visual.isValidScene) {
-                      trackSubrequest(2); // KV emit
                       await emit("image_result", `Collage - ${visual.reason}`, {
                         imageUrl: img.thumbnailUrl,
                         status: "collage",
@@ -694,7 +687,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                       if (record) {
                         evidence.push(record);
                         const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -723,7 +715,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                             imageScore: aiVerification.overallConfidence,
                           };
                           evidence.push(aiRecord);
-                          trackSubrequest(2); // KV emit
                           await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
                             imageIndex: validImageIndex,
                             imageUrl: img.thumbnailUrl,
@@ -735,7 +726,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           });
                           break; // Early exit - evidence found!
                         } else {
-                          trackSubrequest(2); // KV emit
                           await emit("image_result", `[${validImageIndex}] No match`, {
                             imageIndex: validImageIndex,
                             imageUrl: img.thumbnailUrl,
@@ -745,7 +735,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         }
                       } catch (aiError) {
                         console.warn("[Investigation] AI verification failed:", aiError instanceof Error ? aiError.message : aiError);
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -755,7 +744,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                       }
                     }
                   } catch (imgError) {
-                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "error",
@@ -994,7 +982,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
       // If no suggestions yet for this frontier, ask AI
       if (currentBridges.length === 0 && checkBudget()) {
-        trackSubrequest(2); // KV emit
         await emit("thinking", `Asking AI for bridge candidates from ${currentFrontier} to ${personB}...`);
 
         const excludeList = Array.from(globalTriedCandidates);
@@ -1026,7 +1013,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
       // If no candidates available, ask LLM for more suggestions
       if (availableCandidates.length === 0 && checkBudget()) {
-        trackSubrequest(2); // KV emit
         await emit("thinking", `All candidates exhausted for ${currentFrontier}. Asking AI for more suggestions...`);
 
         const excludeList = Array.from(globalTriedCandidates);
@@ -1179,7 +1165,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   trackSubrequest(); // LLM verifyCopresence
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
-                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
@@ -1197,7 +1182,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1229,7 +1213,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                           imageScore: aiVerification.overallConfidence,
                         };
                         evidence.push(aiRecord);
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1242,7 +1225,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                         break; // Early exit - evidence found!
                       } else {
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1251,7 +1233,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                       }
                     } catch (aiError) {
-                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] No match`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1261,7 +1242,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
-                  trackSubrequest(2); // KV emit
                   await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",
@@ -1391,7 +1371,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                   trackSubrequest(); // LLM verifyCopresence
                   const visual = await verifyCopresence({ imageUrl: img.imageUrl });
                   if (!visual.isValidScene) {
-                    trackSubrequest(2); // KV emit
                     await emit("image_result", `Collage - ${visual.reason}`, {
                       imageUrl: img.thumbnailUrl,
                       status: "collage",
@@ -1409,7 +1388,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     if (record) {
                       evidence.push(record);
                       const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
-                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${candidateName} & ${personB}`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1442,7 +1420,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         };
                         evidence.push(aiRecord);
                         console.log(`[DEBUG] AI Evidence found and pushed! evidence.length=${evidence.length}, confidence=${aiVerification.overallConfidence}`);
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${candidateName} & ${personB}`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1455,7 +1432,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                         break; // Early exit from images loop - evidence found!
                       } else {
-                        trackSubrequest(2); // KV emit
                         await emit("image_result", `[${validImageIndex}] No match`, {
                           imageIndex: validImageIndex,
                           imageUrl: img.thumbnailUrl,
@@ -1464,7 +1440,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                         });
                       }
                     } catch (aiError) {
-                      trackSubrequest(2); // KV emit
                       await emit("image_result", `[${validImageIndex}] No match`, {
                         imageIndex: validImageIndex,
                         imageUrl: img.thumbnailUrl,
@@ -1474,7 +1449,6 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
                     }
                   }
                 } catch (imgError) {
-                  trackSubrequest(2); // KV emit
                   await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
                     imageUrl: img.thumbnailUrl,
                     status: "error",

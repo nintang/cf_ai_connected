@@ -386,6 +386,9 @@ export const LiveGraph = forwardRef<LiveGraphHandle, LiveGraphProps>(
           labelRenderedSizeThreshold: 0,
           zoomToSizeRatioFunction: () => 1,
           enableEdgeEvents: true,
+          // Increase edge picking distance for easier touch on mobile
+          // @ts-expect-error - pickingDistance is a valid sigma option
+          pickingDistance: 15, // Larger hit area for edges (default is ~5)
           // Node reducer - highlight current investigation nodes
           nodeReducer: (node, data) => {
             const res = { ...data };

@@ -220,10 +220,13 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       });
     });
 
-    // Add edges with attributes - more visible edges
+    // Add edges with attributes - thicker edges for mobile touch
+    const isMobileDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
     filteredEdges.forEach((edge) => {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
-        const edgeSize = Math.max(1.5, edge.confidence / 30);
+        // Make edges thicker on mobile for easier touch
+        const baseEdgeSize = isMobileDevice ? 3 : 1.5;
+        const edgeSize = Math.max(baseEdgeSize, edge.confidence / (isMobileDevice ? 20 : 30));
         graph.addEdge(edge.source, edge.target, {
           size: edgeSize,
           baseSize: edgeSize,
@@ -275,6 +278,10 @@ export function SocialGraph({ className, compact = false, onStatsChange, autoRef
       labelRenderedSizeThreshold: compact ? 100 : 0, // In compact mode, only show labels for very large nodes (effectively none)
       zoomToSizeRatioFunction: () => 1,
       enableEdgeEvents: true,
+      // Increase edge picking distance for easier touch on mobile
+      edgeLabelSize: 12,
+      // @ts-expect-error - pickingDistance is a valid sigma option
+      pickingDistance: 15, // Larger hit area for edges (default is ~5)
       // Node reducer - show labels on hover in compact mode, dim non-connected nodes
       nodeReducer: (node, data) => {
         const res = { ...data };

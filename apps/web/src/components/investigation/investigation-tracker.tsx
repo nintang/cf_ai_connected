@@ -722,14 +722,14 @@ export function InvestigationTracker({
             )}
           </Card>
 
-          {/* Segment selector - horizontal scroll on mobile, vertical on desktop */}
+          {/* Segment selector - horizontal scroll on mobile, vertical scroll on desktop */}
           {hasSegments && (
-            <div className="space-y-1 sm:space-y-1.5">
-              <div className="text-[9px] sm:text-[10px] text-foreground/40 uppercase tracking-wide px-1">
+            <div className="space-y-1 sm:space-y-1.5 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+              <div className="text-[9px] sm:text-[10px] text-foreground/40 uppercase tracking-wide px-1 shrink-0">
                 Segments
               </div>
-              {/* Mobile: horizontal scroll */}
-              <div className="flex lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0 scrollbar-none">
+              {/* Mobile: horizontal scroll, Desktop: vertical scroll (hidden scrollbar) */}
+              <div className="flex lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-y-auto lg:overflow-x-hidden pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0 scrollbar-none lg:max-h-[calc(100vh-400px)]">
                 {state.segments.map((segment) => (
                   <button
                     key={segment.id}

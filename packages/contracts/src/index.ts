@@ -174,7 +174,7 @@ export interface InvestigationConfig {
 }
 
 export const DEFAULT_CONFIG: InvestigationConfig = {
-  hopLimit: 6,
+  hopLimit: 15,
   confidenceThreshold: 80,
   imagesPerQuery: 5,
 };
@@ -202,9 +202,9 @@ export interface InvestigationBudgets {
 }
 
 export const DEFAULT_BUDGETS: InvestigationBudgets = {
-  maxSearchCalls: 100,
-  maxRekognitionCalls: 200,
-  maxLLMCalls: 10,
+  maxSearchCalls: 150,
+  maxRekognitionCalls: 300,
+  maxLLMCalls: 25,
   searchCallsUsed: 0,
   rekognitionCallsUsed: 0,
   llmCallsUsed: 0,
@@ -403,6 +403,10 @@ export interface InvestigationEvent {
     status?: "collage" | "no_match" | "evidence" | "error";
     reason?: string;
     celebrities?: Array<{ name: string; confidence: number }>;
+    /** Whether this evidence was verified by AI (vs Rekognition) */
+    aiVerified?: boolean;
+    /** Additional notes from AI verification */
+    aiNotes?: string;
     // For evidence events
     edge?: {
       from: string;

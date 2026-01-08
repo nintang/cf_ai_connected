@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { IconArrowNarrowRight, IconPlayerPlay, IconX } from "@tabler/icons-react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -245,6 +246,13 @@ export function EvidenceCarouselOverlay({
   onOpenChange,
   initialIndex = 0,
 }: EvidenceCarouselOverlayProps) {
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure we only render portal on client
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Close on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -260,9 +268,9 @@ export function EvidenceCarouselOverlay({
     };
   }, [open, onOpenChange]);
 
-  if (!open || slides.length === 0) return null;
+  if (!open || slides.length === 0 || !mounted) return null;
 
-  return (
+  const overlayContent = (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300"
       onClick={() => onOpenChange(false)}
@@ -290,6 +298,9 @@ export function EvidenceCarouselOverlay({
       </div>
     </div>
   );
+
+  // Use portal to render at document body level, escaping any parent stacking contexts
+  return createPortal(overlayContent, document.body);
 }
 
 interface PlayButtonProps {

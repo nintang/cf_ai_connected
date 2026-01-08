@@ -21,6 +21,8 @@ export interface Env {
   GEMINI_GATEWAY_URL?: string;
   // CORS - comma-separated list of allowed origins
   ALLOWED_ORIGINS?: string;
+  // Whitelisted IPs - comma-separated list (bypasses rate limit)
+  WHITELISTED_IPS?: string;
 }
 
 export default {};

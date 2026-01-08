@@ -316,14 +316,14 @@ export function EvidencePlayButton({ onClick, count, className }: PlayButtonProp
     <button
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-full",
+        "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full",
         "bg-orange-500 text-white hover:bg-orange-600",
         "transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm",
         className
       )}
     >
-      <IconPlayerPlay size={14} />
-      View {count} photo{count !== 1 ? "s" : ""}
+      <IconPlayerPlay size={16} />
+      Browse evidence
     </button>
   );
 }

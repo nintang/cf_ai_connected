@@ -531,22 +531,9 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
 
   return (
     <>
-      <div className="relative space-y-3 sm:space-y-4">
-        {/* Play button at top right */}
-        {carouselSlides.length > 0 && (
-          <div className="absolute -top-1 right-0">
-            <EvidencePlayButton
-              onClick={() => {
-                setCarouselIndex(0);
-                setCarouselOpen(true);
-              }}
-              count={carouselSlides.length}
-            />
-          </div>
-        )}
-
+      <div className="space-y-3 sm:space-y-4">
         {/* Compact path overview */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pr-24 sm:pr-28">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {names.map((name, idx) => (
             <div key={idx} className="flex items-center gap-1.5 sm:gap-2">
               <div className={cn(
@@ -574,6 +561,19 @@ function FinalPath({ path, evidence }: { path: InvestigationState["path"]; evide
                 isIntermediary={idx > 0 && idx < path.length - 1}
               />
             ))}
+          </div>
+        )}
+
+        {/* Browse evidence button at bottom */}
+        {carouselSlides.length > 0 && (
+          <div className="pt-2">
+            <EvidencePlayButton
+              onClick={() => {
+                setCarouselIndex(0);
+                setCarouselOpen(true);
+              }}
+              count={carouselSlides.length}
+            />
           </div>
         )}
       </div>

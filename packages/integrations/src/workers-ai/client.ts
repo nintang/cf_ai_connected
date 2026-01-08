@@ -6,6 +6,7 @@ interface BridgeCandidateSuggestion {
   reasoning: string;
   connectionToA: string;
   connectionToB: string;
+  confidence: number;
 }
 
 export class WorkersAIPlannerClient {
@@ -96,6 +97,7 @@ No extra text.${excludeClause}`;
           reasoning: String(bc.reasoning ?? "").trim(),
           connectionToA: String(bc.connectionToA ?? "").trim(),
           connectionToB: String(bc.connectionToB ?? "").trim(),
+          confidence: typeof bc.confidence === "number" ? bc.confidence : 70, // Default confidence
         }))
         .filter((bc: BridgeCandidateSuggestion) => bc.name.length > 0)
         .slice(0, 6);

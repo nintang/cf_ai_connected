@@ -796,7 +796,26 @@ Output ONLY valid JSON:
         confidence: typeof bc.confidence === "number" ? bc.confidence : 50,
       })).slice(0, 10);
     } catch (error) {
-      console.warn("[OpenRouter] Bridge candidate suggestion failed:", error);
+      // Log detailed error information for debugging
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.name : "Unknown";
+      console.error("[OpenRouter] Bridge candidate suggestion failed:", {
+        error: errorMessage,
+        errorType: errorName,
+        personA,
+        personB,
+        excludeCount: exclude?.length ?? 0,
+      });
+
+      // Check for specific error types that might indicate transient issues
+      if (errorMessage.includes("timeout") || errorMessage.includes("ECONNRESET")) {
+        console.warn("[OpenRouter] Transient network error - caller may retry");
+      } else if (errorMessage.includes("rate limit") || errorMessage.includes("429")) {
+        console.warn("[OpenRouter] Rate limited - caller should backoff");
+      } else if (errorMessage.includes("invalid") || errorMessage.includes("malformed")) {
+        console.warn("[OpenRouter] Invalid response - LLM may have returned bad JSON");
+      }
+
       return [];
     }
   }

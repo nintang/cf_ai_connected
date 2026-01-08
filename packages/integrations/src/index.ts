@@ -7,7 +7,7 @@ export {
   CelebrityRekognitionClient,
   createRekognitionClient,
 } from "./rekognition/client.js";
-export type { RekognitionConfig } from "./rekognition/client.js";
+export type { RekognitionConfig, RekognitionAnalysisResult } from "./rekognition/client.js";
 
 // Gemini Visual Filter
 export {

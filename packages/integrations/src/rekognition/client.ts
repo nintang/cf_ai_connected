@@ -10,6 +10,16 @@ import type {
 } from "@visual-degrees/contracts";
 
 /**
+ * Extended result type that includes throttling information
+ */
+export interface RekognitionAnalysisResult extends ImageAnalysisResult {
+  /** Whether the request was throttled after exhausting all retries */
+  throttled?: boolean;
+  /** Error message if the request failed (non-throttle error) */
+  error?: string;
+}
+
+/**
  * Configuration for Amazon Rekognition client
  */
 export interface RekognitionConfig {
@@ -20,6 +30,10 @@ export interface RekognitionConfig {
   fetchTimeout?: number;
   /** Maximum image size in bytes (default: 5MB - Rekognition limit) */
   maxImageSize?: number;
+  /** Maximum number of retries for rate-limited requests (default: 3) */
+  maxRetries?: number;
+  /** Base delay for exponential backoff in ms (default: 1000) */
+  baseRetryDelay?: number;
 }
 
 /** Supported image MIME types for Rekognition */
@@ -32,6 +46,8 @@ export class CelebrityRekognitionClient {
   private readonly client: RekognitionClient;
   private readonly fetchTimeout: number;
   private readonly maxImageSize: number;
+  private readonly maxRetries: number;
+  private readonly baseRetryDelay: number;
 
   constructor(config: RekognitionConfig = {}) {
     const credentials =
@@ -49,6 +65,26 @@ export class CelebrityRekognitionClient {
 
     this.fetchTimeout = config.fetchTimeout ?? 10000; // 10 seconds
     this.maxImageSize = config.maxImageSize ?? 5 * 1024 * 1024; // 5MB (Rekognition limit)
+    this.maxRetries = config.maxRetries ?? 3;
+    this.baseRetryDelay = config.baseRetryDelay ?? 1000; // 1 second
+  }
+
+  /**
+   * Sleep for a given number of milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Calculate delay with exponential backoff and jitter
+   */
+  private getRetryDelay(attempt: number): number {
+    // Exponential backoff: 1s, 2s, 4s, etc.
+    const exponentialDelay = this.baseRetryDelay * Math.pow(2, attempt);
+    // Add jitter (0-500ms) to prevent thundering herd
+    const jitter = Math.random() * 500;
+    return exponentialDelay + jitter;
   }
 
   /**
@@ -95,23 +131,50 @@ export class CelebrityRekognitionClient {
         throw new Error(`Unsupported content type: ${contentType || "unknown"}`);
       }
 
-      // Check content length
+      // Check content length header first - reject early if too large
       const contentLength = response.headers.get("content-length");
-      if (contentLength && parseInt(contentLength, 10) > this.maxImageSize) {
-        throw new Error(`Image too large for Rekognition (max 5MB)`);
+      if (contentLength) {
+        const declaredSize = parseInt(contentLength, 10);
+        if (declaredSize > this.maxImageSize) {
+          throw new Error(`Image too large for Rekognition (${Math.round(declaredSize / 1024 / 1024)}MB, max 5MB)`);
+        }
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-
-      if (arrayBuffer.byteLength > this.maxImageSize) {
-        throw new Error(`Image too large: ${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB`);
+      // Use streaming read to abort early if size exceeds limit
+      // This protects against missing/incorrect Content-Length headers
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body");
       }
 
-      if (arrayBuffer.byteLength === 0) {
+      const chunks: Uint8Array[] = [];
+      let totalSize = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        totalSize += value.length;
+        if (totalSize > this.maxImageSize) {
+          reader.cancel();
+          throw new Error(`Image too large for Rekognition (>${Math.round(this.maxImageSize / 1024 / 1024)}MB, max 5MB)`);
+        }
+        chunks.push(value);
+      }
+
+      if (totalSize === 0) {
         throw new Error("Empty image response");
       }
 
-      return new Uint8Array(arrayBuffer);
+      // Combine chunks into single Uint8Array
+      const result = new Uint8Array(totalSize);
+      let offset = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      return result;
 
     } catch (error) {
       clearTimeout(timeoutId);
@@ -131,8 +194,20 @@ export class CelebrityRekognitionClient {
    * @param imageUrl - URL of the image to analyze
    * @returns Analysis result with detected celebrities
    */
-  async detectCelebrities(imageUrl: string): Promise<ImageAnalysisResult> {
-    const imageBytes = await this.fetchImageBytes(imageUrl);
+  async detectCelebrities(imageUrl: string): Promise<RekognitionAnalysisResult> {
+    let imageBytes: Uint8Array;
+    try {
+      imageBytes = await this.fetchImageBytes(imageUrl);
+    } catch (fetchError) {
+      // Image fetch failed - return error result instead of throwing
+      const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.warn(`[Rekognition] Image fetch failed for ${imageUrl}: ${errorMessage}`);
+      return {
+        imageUrl,
+        celebrities: [],
+        error: errorMessage,
+      };
+    }
 
     const command = new RecognizeCelebritiesCommand({
       Image: {
@@ -140,13 +215,64 @@ export class CelebrityRekognitionClient {
       },
     });
 
-    const response = await this.client.send(command);
+    // Retry loop with exponential backoff for rate limiting
+    let lastError: Error | null = null;
+    let wasThrottled = false;
 
-    const celebrities = this.parseCelebrities(response.CelebrityFaces ?? []);
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const response = await this.client.send(command);
+        const celebrities = this.parseCelebrities(response.CelebrityFaces ?? []);
+        return {
+          imageUrl,
+          celebrities,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
 
+        // Check if it's a throttling error (429 or ProvisionedThroughputExceededException)
+        const isThrottled =
+          lastError.message.includes("429") ||
+          lastError.message.includes("Too Many Requests") ||
+          lastError.message.includes("ThrottlingException") ||
+          lastError.message.includes("ProvisionedThroughputExceeded") ||
+          lastError.name === "ThrottlingException" ||
+          lastError.name === "ProvisionedThroughputExceededException";
+
+        if (isThrottled) {
+          wasThrottled = true;
+          if (attempt < this.maxRetries) {
+            const delay = this.getRetryDelay(attempt);
+            console.log(`[Rekognition] Rate limited, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${this.maxRetries})`);
+            await this.sleep(delay);
+            continue;
+          }
+          // Max retries exceeded for throttling - return throttled result
+          console.warn(`[Rekognition] Throttled after ${this.maxRetries} retries for ${imageUrl}`);
+          return {
+            imageUrl,
+            celebrities: [],
+            throttled: true,
+            error: "Rate limited - max retries exceeded",
+          };
+        }
+
+        // Non-retryable error - return error result
+        console.warn(`[Rekognition] Non-retryable error for ${imageUrl}: ${lastError.message}`);
+        return {
+          imageUrl,
+          celebrities: [],
+          error: lastError.message,
+        };
+      }
+    }
+
+    // Should not reach here, but return error result just in case
     return {
       imageUrl,
-      celebrities,
+      celebrities: [],
+      throttled: wasThrottled,
+      error: lastError?.message ?? "Unknown error in detectCelebrities",
     };
   }
 

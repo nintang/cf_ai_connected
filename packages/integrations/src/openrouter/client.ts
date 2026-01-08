@@ -198,6 +198,14 @@ Rules:
 
 TASK: Suggest SPECIFIC REAL PEOPLE who could serve as "bridges" between Person A and Person B.
 
+TIMELINE AWARENESS:
+When suggesting candidates, consider the time periods when people were alive and publicly active:
+- Prefer candidates whose active years overlap with BOTH Person A and Person B
+- If Person A and Person B lived in different eras, prioritize long-lived people who could have met both
+- Example: Connecting someone from the 1960s to someone from the 2000s? Look for people with very long careers spanning both periods
+- Give HIGHER CONFIDENCE scores to candidates with clear timeline overlap
+- Give LOWER CONFIDENCE scores to candidates where timeline overlap is uncertain
+
 SELECTION CRITERIA (in order of importance):
 1. INDUSTRY OVERLAP: People who work in industries that BOTH Person A and B touch
    - Example: A music producer who works with both rappers and pop stars
@@ -222,8 +230,9 @@ SELECTION CRITERIA (in order of importance):
    - Moguls, philanthropists with wide networks
 
 IMPORTANT:
+- ALWAYS suggest candidates - never return an empty list
 - Suggest REAL SPECIFIC NAMES with clear reasoning
-- Higher confidence = stronger connection logic to BOTH people
+- Higher confidence = stronger connection logic to BOTH people AND better timeline overlap
 - Prioritize people who are HIGH-PROFILE (more likely to have public photos)
 - Think about WHO would realistically be at events with BOTH people
 

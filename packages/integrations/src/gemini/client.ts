@@ -547,6 +547,13 @@ DO NOT say things like:
 
 TASK: Suggest SPECIFIC REAL PEOPLE who might bridge Person A and Person B.
 
+TIMELINE AWARENESS:
+When suggesting candidates, consider the time periods when people were alive and publicly active:
+- Prefer candidates whose active years overlap with BOTH Person A and Person B
+- If Person A and Person B lived in different eras, prioritize long-lived people who could have met both
+- Give HIGHER CONFIDENCE scores to candidates with clear timeline overlap
+- Give LOWER CONFIDENCE scores to candidates where timeline overlap is uncertain
+
 Think about:
 1. Who has Person A been PUBLICLY PHOTOGRAPHED with?
 2. Who has Person B been PUBLICLY PHOTOGRAPHED with?
@@ -560,6 +567,7 @@ Focus on:
 - Business meetings, charity events
 
 IMPORTANT:
+- ALWAYS suggest candidates - never return an empty list
 - Suggest REAL SPECIFIC NAMES, not categories
 - These should be people likely to have been photographed with BOTH A and B
 - Prioritize high-profile people (more likely to have photos)

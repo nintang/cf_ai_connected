@@ -264,13 +264,13 @@ export function EvidenceCarouselOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300"
       onClick={() => onOpenChange(false)}
     >
       {/* Close button */}
       <button
         onClick={() => onOpenChange(false)}
-        className="absolute top-4 right-4 z-50 w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+        className="absolute top-4 right-4 z-[101] w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full transition-colors"
         title="Close (Esc)"
       >
         <IconX className="text-white" size={20} />

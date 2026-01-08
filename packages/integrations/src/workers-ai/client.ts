@@ -58,11 +58,15 @@ NARRATION EXAMPLES (use this style):
 
     const prompt = `You are an expert strategist for finding visual connections between public figures.
 
+TIMELINE AWARENESS: Consider when people were alive/active. Prefer candidates whose careers overlap with BOTH Person A and Person B. For people from different eras, look for long-lived individuals who could bridge both periods. Give higher confidence to candidates with clear timeline overlap.
+
 Suggest SPECIFIC REAL PEOPLE who could bridge Person A and Person B based on:
 1. INDUSTRY OVERLAP: People working in industries both A and B touch
 2. SOCIAL CIRCLES: Mutual friends, collaborators, same events (Met Gala, Grammys, etc.)
 3. SUPER-CONNECTORS: Talk show hosts, producers, moguls with wide networks
 4. GEOGRAPHIC HUBS: People in same cities/scenes as both
+
+ALWAYS suggest candidates - never return an empty list.
 
 Return strict JSON only:
 {

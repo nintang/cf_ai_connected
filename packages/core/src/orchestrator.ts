@@ -261,12 +261,10 @@ export class InvestigationOrchestrator {
       verifiedEdges: [],
       failedCandidates: [],
       budgets: {
-        maxSearchCalls: 30,
-        maxRekognitionCalls: 150,
-        maxLLMCalls: 20,
-        searchCallsUsed: 0,
-        rekognitionCallsUsed: 0,
-        llmCallsUsed: 0,
+        maxSteps: 15,
+        stepsUsed: 0,
+        maxSubrequests: 900,
+        subrequestsUsed: 0,
       },
       status: "running",
     };
@@ -686,7 +684,7 @@ export class InvestigationOrchestrator {
       this.emit("strategy", `Analyzing candidates strategically...`);
 
       try {
-        state.budgets.llmCallsUsed++;
+        state.budgets.subrequestsUsed++; // LLM call
         const ranking = await this.clients.planner.rankCandidatesStrategically(
           state.frontier,
           state.personB,
@@ -758,8 +756,8 @@ export class InvestigationOrchestrator {
     state: InvestigationState,
     candidates: Candidate[]
   ): Promise<PlannerOutput> {
-    // Check LLM budget
-    if (state.budgets.llmCallsUsed >= state.budgets.maxLLMCalls) {
+    // Check budget
+    if (state.budgets.subrequestsUsed >= state.budgets.maxSubrequests) {
       // Fallback to heuristic
       return this.heuristicSelection(candidates, state);
     }
@@ -772,12 +770,8 @@ export class InvestigationOrchestrator {
       hopLimit: this.config.hopLimit,
       confidenceThreshold: this.config.confidenceThreshold,
       budgets: {
-        searchCallsRemaining:
-          state.budgets.maxSearchCalls - state.budgets.searchCallsUsed,
-        rekognitionCallsRemaining:
-          state.budgets.maxRekognitionCalls - state.budgets.rekognitionCallsUsed,
-        llmCallsRemaining:
-          state.budgets.maxLLMCalls - state.budgets.llmCallsUsed,
+        stepsRemaining: state.budgets.maxSteps - state.budgets.stepsUsed,
+        subrequestsRemaining: state.budgets.maxSubrequests - state.budgets.subrequestsUsed,
       },
       verifiedEdges: state.verifiedEdges.map((e) => ({
         from: e.from,
@@ -788,7 +782,7 @@ export class InvestigationOrchestrator {
       candidates,
     };
 
-    state.budgets.llmCallsUsed++;
+    state.budgets.subrequestsUsed++; // LLM call
 
     try {
       const result = await this.clients.planner.selectNextExpansion(input);
@@ -923,25 +917,24 @@ export class InvestigationOrchestrator {
     person1: string,
     person2: string
   ): Promise<EvidenceRecord[]> {
-    if (state.budgets.searchCallsUsed >= state.budgets.maxSearchCalls) {
+    if (state.budgets.subrequestsUsed >= state.budgets.maxSubrequests) {
       return [];
     }
 
-    state.budgets.searchCallsUsed++;
+    state.budgets.subrequestsUsed++; // Search call
     const searchResponse = await this.clients.search.searchImages(query);
     const images = searchResponse.results.slice(0, this.config.imagesPerQuery);
 
     const evidence: EvidenceRecord[] = [];
 
     for (const imageResult of images) {
-      if (
-        state.budgets.rekognitionCallsUsed >= state.budgets.maxRekognitionCalls
-      ) {
+      if (state.budgets.subrequestsUsed >= state.budgets.maxSubrequests) {
         break;
       }
 
       try {
         // Visual filter first
+        state.budgets.subrequestsUsed++; // LLM call
         const visualCheck = await this.clients.visualFilter.verifyVisualCopresence(
           imageResult.imageUrl
         );
@@ -951,7 +944,7 @@ export class InvestigationOrchestrator {
         }
 
         // Rekognition
-        state.budgets.rekognitionCallsUsed++;
+        state.budgets.subrequestsUsed++; // Rekognition call
         const analysis = await this.clients.celebrityDetection.detectCelebrities(
           imageResult.imageUrl
         );
@@ -992,25 +985,24 @@ export class InvestigationOrchestrator {
     query: string,
     targetPerson: string
   ): Promise<AnalysisWithContext[]> {
-    if (state.budgets.searchCallsUsed >= state.budgets.maxSearchCalls) {
+    if (state.budgets.subrequestsUsed >= state.budgets.maxSubrequests) {
       return [];
     }
 
-    state.budgets.searchCallsUsed++;
+    state.budgets.subrequestsUsed++; // Search call
     const searchResponse = await this.clients.search.searchImages(query);
     const images = searchResponse.results.slice(0, this.config.imagesPerQuery);
 
     const analyses: AnalysisWithContext[] = [];
 
     for (const imageResult of images) {
-      if (
-        state.budgets.rekognitionCallsUsed >= state.budgets.maxRekognitionCalls
-      ) {
+      if (state.budgets.subrequestsUsed >= state.budgets.maxSubrequests) {
         break;
       }
 
       try {
         // Visual filter first
+        state.budgets.subrequestsUsed++; // LLM call
         const visualCheck = await this.clients.visualFilter.verifyVisualCopresence(
           imageResult.imageUrl
         );
@@ -1020,7 +1012,7 @@ export class InvestigationOrchestrator {
         }
 
         // Rekognition
-        state.budgets.rekognitionCallsUsed++;
+        state.budgets.subrequestsUsed++; // Rekognition call
         const analysis = await this.clients.celebrityDetection.detectCelebrities(
           imageResult.imageUrl
         );
@@ -1043,8 +1035,8 @@ export class InvestigationOrchestrator {
    */
   private isBudgetExhausted(budgets: InvestigationBudgets): boolean {
     return (
-      budgets.searchCallsUsed >= budgets.maxSearchCalls ||
-      budgets.rekognitionCallsUsed >= budgets.maxRekognitionCalls
+      budgets.stepsUsed >= budgets.maxSteps ||
+      budgets.subrequestsUsed >= budgets.maxSubrequests
     );
   }
 

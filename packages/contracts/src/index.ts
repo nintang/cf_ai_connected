@@ -176,7 +176,7 @@ export interface InvestigationConfig {
 export const DEFAULT_CONFIG: InvestigationConfig = {
   hopLimit: 15,
   confidenceThreshold: 80,
-  imagesPerQuery: 5,
+  imagesPerQuery: 3, // Reduced from 5 to avoid Cloudflare subrequest limits
 };
 
 // ============================================================================
@@ -184,30 +184,24 @@ export const DEFAULT_CONFIG: InvestigationConfig = {
 // ============================================================================
 
 /**
- * Budget tracking for API calls during investigation
+ * Budget tracking for investigation workflow
  */
 export interface InvestigationBudgets {
-  /** Maximum search API calls allowed */
-  maxSearchCalls: number;
-  /** Maximum Rekognition API calls allowed */
-  maxRekognitionCalls: number;
-  /** Maximum LLM API calls allowed */
-  maxLLMCalls: number;
-  /** Search calls used so far */
-  searchCallsUsed: number;
-  /** Rekognition calls used so far */
-  rekognitionCallsUsed: number;
-  /** LLM calls used so far */
-  llmCallsUsed: number;
+  /** Maximum DFS steps (candidate verifications) allowed */
+  maxSteps: number;
+  /** Steps used so far */
+  stepsUsed: number;
+  /** Maximum subrequests allowed (Cloudflare limit is 1000, we use 900 for safety) */
+  maxSubrequests: number;
+  /** Subrequests used so far (tracks ALL external calls) */
+  subrequestsUsed: number;
 }
 
 export const DEFAULT_BUDGETS: InvestigationBudgets = {
-  maxSearchCalls: 150,
-  maxRekognitionCalls: 300,
-  maxLLMCalls: 25,
-  searchCallsUsed: 0,
-  rekognitionCallsUsed: 0,
-  llmCallsUsed: 0,
+  maxSteps: 15,
+  stepsUsed: 0,
+  maxSubrequests: 900,
+  subrequestsUsed: 0,
 };
 
 // ============================================================================
@@ -244,11 +238,10 @@ export interface PlannerInput {
   hopLimit: number;
   /** Confidence threshold for acceptance */
   confidenceThreshold: number;
-  /** Remaining budget for API calls */
+  /** Remaining budget */
   budgets: {
-    searchCallsRemaining: number;
-    rekognitionCallsRemaining: number;
-    llmCallsRemaining: number;
+    stepsRemaining: number;
+    subrequestsRemaining: number;
   };
   /** Edges verified so far in the path */
   verifiedEdges: Array<{ from: string; to: string; confidence: number }>;
@@ -412,6 +405,7 @@ export interface InvestigationEvent {
       from: string;
       to: string;
       confidence: number;
+      evidenceUrl?: string;
       thumbnailUrl?: string;
       contextUrl?: string;
     };

@@ -150,13 +150,32 @@ The user might say things like:
 - "elon musk beyonce" (just two names)
 - "Is there a connection between Obama and Oprah?"
 - "Link Kim Kardashian with Pete Davidson"
+- "president of america and president of zimbabwe"
+- "CEO of Tesla and founder of Amazon"
+- "the queen of england and the pope"
+
+IMPORTANT - RESOLVE TITLES/ROLES TO ACTUAL NAMES:
+When the user mentions someone by their title, role, or position instead of their name, you MUST resolve it to the actual person's name:
+- "president of america" / "US president" → The current or most recent well-known president (e.g., "Donald Trump" or "Joe Biden")
+- "president of zimbabwe" → "Emmerson Mnangagwa"
+- "CEO of Tesla" → "Elon Musk"
+- "founder of Amazon" → "Jeff Bezos"
+- "queen of england" → "Queen Elizabeth II" or "King Charles III" (depending on context)
+- "the pope" → "Pope Francis"
+- "richest man in the world" → Whoever currently holds that title
+
+Use your knowledge to resolve these titles to actual celebrity/public figure names. If uncertain about who currently holds a title, use the most famous/recognizable person associated with that role.
 
 Output ONLY valid JSON:
 {
   "personA": "First Person's Full Name",
   "personB": "Second Person's Full Name",
   "isValid": true,
-  "confidence": 0-100
+  "confidence": 0-100,
+  "resolvedFrom": {
+    "personA": "original text if resolved from title/role, or null",
+    "personB": "original text if resolved from title/role, or null"
+  }
 }
 
 If you cannot identify two distinct people, output:
@@ -171,6 +190,7 @@ If you cannot identify two distinct people, output:
 Rules:
 - Use the most common/recognizable name for each person
 - Correct obvious typos (e.g., "elon muck" → "Elon Musk")
+- ALWAYS resolve titles/roles/positions to actual person names
 - If only one person is mentioned, isValid = false
 - If query isn't about connecting people, isValid = false`;
 
@@ -234,12 +254,25 @@ Output ONLY valid JSON:
    */
   private async makeRequest(
     messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }>,
-    options?: { maxTokens?: number }
+    options?: { maxTokens?: number; enableWebSearch?: boolean }
   ): Promise<string> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
 
     try {
+      // Build request body
+      const requestBody: Record<string, unknown> = {
+        model: this.model,
+        messages,
+        max_tokens: options?.maxTokens ?? 1024,
+        temperature: 0.7,
+      };
+
+      // Add web search plugin if enabled (OpenRouter feature)
+      if (options?.enableWebSearch) {
+        requestBody.plugins = [{ id: "web" }];
+      }
+
       const response = await fetch(OPENROUTER_API_URL, {
         method: "POST",
         headers: {
@@ -248,12 +281,7 @@ Output ONLY valid JSON:
           "HTTP-Referer": "https://connected.app",
           "X-Title": "Connected?",
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          max_tokens: options?.maxTokens ?? 1024,
-          temperature: 0.7,
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
@@ -822,6 +850,7 @@ Output ONLY valid JSON:
 
   /**
    * Parse a natural language query to extract two person names using AI
+   * Supports resolving titles/roles to actual names (e.g., "president of USA" → "Donald Trump")
    */
   async parseQuery(query: string): Promise<{
     personA: string;
@@ -829,12 +858,17 @@ Output ONLY valid JSON:
     isValid: boolean;
     confidence: number;
     reason?: string;
+    resolvedFrom?: {
+      personA: string | null;
+      personB: string | null;
+    };
   }> {
     try {
+      // Enable web search for up-to-date info on current office holders
       const responseText = await this.makeRequest([
         { role: "system", content: OpenRouterClient.QUERY_PARSER_PROMPT },
-        { role: "user", content: `Parse this query and extract the two people to connect:\n\n"${query}"` },
-      ], { maxTokens: 256 });
+        { role: "user", content: `Parse this query and extract the two people to connect. If the query uses titles/roles (like "president of X" or "CEO of Y"), resolve them to actual person names:\n\n"${query}"` },
+      ], { maxTokens: 512, enableWebSearch: true });
 
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -843,12 +877,19 @@ Output ONLY valid JSON:
 
       const parsed = JSON.parse(jsonMatch[0]);
 
+      // Extract resolved info if present
+      const resolvedFrom = parsed.resolvedFrom ? {
+        personA: parsed.resolvedFrom.personA || null,
+        personB: parsed.resolvedFrom.personB || null,
+      } : undefined;
+
       return {
         personA: String(parsed.personA ?? "").trim(),
         personB: String(parsed.personB ?? "").trim(),
         isValid: Boolean(parsed.isValid),
         confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
         reason: parsed.reason ? String(parsed.reason) : undefined,
+        resolvedFrom,
       };
     } catch (error) {
       console.warn("[OpenRouter] Query parsing failed:", error);
@@ -893,7 +934,7 @@ Output ONLY valid JSON:
         : this.generateDefaultQueries(validatedCandidates[0], input.personB);
 
       return {
-        nextCandidates: validatedCandidates.slice(0, 2),
+        nextCandidates: validatedCandidates.slice(0, 5), // Try up to 5 candidates per level
         searchQueries,
         narration: String(parsed.narration ?? "Expanding search..."),
         stop: Boolean(parsed.stop),

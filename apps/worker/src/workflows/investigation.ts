@@ -6,13 +6,12 @@ import {
   InvestigationState,
   DEFAULT_BUDGETS,
   DEFAULT_CONFIG,
-  Candidate,
   VerifiedEdge,
   InvestigationResult,
   InvestigationEvent,
   InvestigationEventType,
   InvestigationStepId,
-  StepStatus,
+  EvidenceRecord,
 } from "@visual-degrees/contracts";
 import {
   directQuery,
@@ -21,7 +20,8 @@ import {
   isValidEvidence,
   createEvidenceRecord,
   createVerifiedEdge,
-  calculatePathConfidence
+  calculatePathConfidence,
+  namesMatch,
 } from "@visual-degrees/core";
 import { upsertEdge } from "../graph-db";
 import type { GraphEdgeUpdate } from "../durable-objects/graph-broadcaster";
@@ -43,6 +43,12 @@ const STEP_DEFINITIONS: Record<InvestigationStepId, { number: number; title: str
 };
 
 /**
+ * Constants for event storage
+ */
+const EVENT_INDEX_PADDING = 6;  // Supports up to 999,999 events per run
+const EVENT_TTL_SECONDS = 3600; // 1 hour expiration
+
+/**
  * Creates an event emitter that stores events in KV
  */
 function createEventEmitter(kv: KVNamespace, runId: string) {
@@ -55,7 +61,7 @@ function createEventEmitter(kv: KVNamespace, runId: string) {
     data?: InvestigationEvent["data"]
   ): Promise<void> => {
     // Create unique event ID using sequential index
-    const eventId = `${runId}:${String(eventIndex).padStart(6, "0")}`;
+    const eventId = `${runId}:${String(eventIndex).padStart(EVENT_INDEX_PADDING, "0")}`;
 
     const event: InvestigationEvent = {
       type,
@@ -69,18 +75,29 @@ function createEventEmitter(kv: KVNamespace, runId: string) {
     };
 
     // Store event with sequential key for ordering
+    // Order: write event first (invisible to readers), then update count (makes it visible)
+    // This ensures readers never see a count pointing to a non-existent event
     const key = eventId;
-    eventIndex++;
+    const nextIndex = eventIndex + 1;
 
-    await kv.put(key, JSON.stringify(event), {
-      // Expire after 1 hour to clean up
-      expirationTtl: 3600,
-    });
+    try {
+      // Step 1: Write the event (not visible to readers until count updated)
+      await kv.put(key, JSON.stringify(event), {
+        expirationTtl: EVENT_TTL_SECONDS,
+      });
 
-    // Also update the event count for easy retrieval
-    await kv.put(`${runId}:count`, String(eventIndex), {
-      expirationTtl: 3600,
-    });
+      // Step 2: Update the count (makes the event visible to readers)
+      await kv.put(`${runId}:count`, String(nextIndex), {
+        expirationTtl: EVENT_TTL_SECONDS,
+      });
+
+      // Only increment if both writes succeeded
+      eventIndex = nextIndex;
+    } catch (error) {
+      console.error("[EventEmitter] Failed to persist event:", error instanceof Error ? error.message : error);
+      // Still increment to avoid duplicate keys, but log the failure
+      eventIndex = nextIndex;
+    }
   };
 
   return {
@@ -142,8 +159,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(edge),
       }));
-    } catch {
+    } catch (error) {
       // Broadcasting is non-critical - don't fail the workflow if it fails
+      console.warn("[Investigation] Graph broadcast failed:", error instanceof Error ? error.message : error);
     }
   }
 
@@ -153,6 +171,44 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
 
     // Create event emitter with step helpers
     const { emit, startStep, updateStep, completeStep } = createEventEmitter(this.env.INVESTIGATION_EVENTS, runId);
+
+    // Input validation
+    const trimmedA = personA?.trim() ?? "";
+    const trimmedB = personB?.trim() ?? "";
+
+    if (!trimmedA || !trimmedB) {
+      await emit("error", "Both person names are required", {
+        category: "VALIDATION_ERROR",
+      });
+      return {
+        status: "error" as const,
+        message: "Both person names are required",
+      };
+    }
+
+    if (namesMatch(trimmedA, trimmedB)) {
+      // Same person - return immediate success with 0 hops
+      await emit("final", `${trimmedA} is the same person - no path needed!`, {
+        result: {
+          personA: trimmedA,
+          personB: trimmedB,
+          path: [trimmedA],
+          edges: [],
+          confidence: { pathBottleneck: 100, pathCumulative: 1 },
+        },
+      });
+      return {
+        status: "success" as const,
+        result: {
+          personA: trimmedA,
+          personB: trimmedB,
+          path: [trimmedA],
+          edges: [],
+          confidence: { pathBottleneck: 100, pathCumulative: 1 },
+        },
+        disclaimer: "Same person specified for both endpoints.",
+      };
+    }
 
     // Tool wrappers
     const searchImages = tools.find(t => t.name === "search_images")!.function as unknown as (args: { query: string }) => Promise<any>;
@@ -189,13 +245,13 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       status: "running",
     };
 
-    // Helper to check budget
+    // Helper to check budget - returns true if we can continue
     const checkBudget = () => {
-      if (state.budgets.searchCallsUsed >= state.budgets.maxSearchCalls ||
-          state.budgets.rekognitionCallsUsed >= state.budgets.maxRekognitionCalls) {
-        return false;
-      }
-      return true;
+      return (
+        state.budgets.searchCallsUsed < state.budgets.maxSearchCalls &&
+        state.budgets.rekognitionCallsUsed < state.budgets.maxRekognitionCalls &&
+        state.budgets.llmCallsUsed < state.budgets.maxLLMCalls
+      );
     };
 
     // Emit initial status
@@ -329,8 +385,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (evidence.length > 0) {
           return createVerifiedEdge(personA, personB, evidence);
         }
-      } catch {
+      } catch (error) {
         // Direct attempt failed
+        console.warn("[Investigation] Direct connection search failed:", error instanceof Error ? error.message : error);
       }
       return null;
     });
@@ -369,8 +426,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
           thumbnailUrl: directEdge.bestEvidence.thumbnailUrl,
           contextUrl: directEdge.bestEvidence.contextUrl,
         });
-      } catch {
+      } catch (error) {
         // Failed to persist edge to graph DB - non-fatal
+        console.warn("[Investigation] Failed to persist direct edge:", error instanceof Error ? error.message : error);
       }
 
       await completeStep("direct_check", true, `Direct connection verified with ${Math.round(directEdge.edgeConfidence)}% confidence!`);
@@ -428,8 +486,10 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     let currentFrontier = personA;
 
     // Track remaining candidates to try at current level (set by backtrack)
+    // When backtracking finds untried candidates at a popped level, we use these
+    // instead of asking the LLM for new suggestions
     let pendingCandidatesToTry: string[] = [];
-    let skipDiscovery = false;
+    let useRemainingCandidates = false;
 
     // Backtrack helper - returns true if we found more candidates to try
     const backtrack = async (): Promise<boolean> => {
@@ -470,7 +530,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         if (untriedCandidates.length > 0) {
           // There are more candidates at this level to try - skip discovery
           pendingCandidatesToTry = untriedCandidates;
-          skipDiscovery = true;
+          useRemainingCandidates = true;
           await emit("thinking", `Found ${untriedCandidates.length} more candidate(s) to try at this level: ${untriedCandidates.slice(0, 3).join(", ")}...`);
           return true;
         }
@@ -495,6 +555,352 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
         await emit("thinking", `Reached hop limit (${DEFAULT_CONFIG.hopLimit}), backtracking...`);
         if (!await backtrack()) break;
         currentFrontier = state.frontier;
+        continue;
+      }
+
+      // Check if we have remaining candidates from backtracking
+      // If so, skip discovery and use them directly
+      if (useRemainingCandidates && pendingCandidatesToTry.length > 0) {
+        await emit("thinking", `Using ${pendingCandidatesToTry.length} remaining candidate(s) from backtrack`);
+
+        // Convert to the format expected by the candidate processing loop
+        const candidatesToTry = pendingCandidatesToTry;
+        pendingCandidatesToTry = [];
+        useRemainingCandidates = false;
+
+        // Skip directly to trying candidates (same logic as below)
+        // This avoids duplicate code by jumping to the candidate verification loop
+        await completeStep("find_bridges", true, `Will try ${candidatesToTry.length} remaining candidate(s): ${candidatesToTry.slice(0, 3).join(", ")}${candidatesToTry.length > 3 ? '...' : ''}`);
+
+        // Try candidates one by one (DFS style) - goto equivalent via labeled continue would be cleaner
+        // but for now we duplicate the essential logic
+        let foundValidEdge = false;
+
+        for (let i = 0; i < candidatesToTry.length; i++) {
+          const candidateName = candidatesToTry[i];
+
+          // Mark as globally tried
+          globalTriedCandidates.add(candidateName.toLowerCase());
+
+          // Verify bridge connection (same logic as main loop)
+          await startStep("verify_bridge", `Verifying: ${currentFrontier} ↔ ${candidateName}`, {
+            fromPerson: currentFrontier,
+            toPerson: candidateName,
+          });
+
+          await updateStep(`Searching for "${currentFrontier} ${candidateName}" images...`, {
+            query: `${currentFrontier} ${candidateName}`,
+          });
+
+          const edgeToCandidate = await step.do(`verify-backtrack-${dfsStack.length}-${candidateName}`, async () => {
+            const queries = verificationQueries(currentFrontier, candidateName);
+            const evidence: EvidenceRecord[] = [];
+            let validImageIndex = 0;
+
+            for (const q of queries) {
+              if (!checkBudget()) break;
+              state.budgets.searchCallsUsed++;
+
+              try {
+                const searchRes = await searchImages({ query: q });
+                const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
+
+                for (const img of images) {
+                  if (!checkBudget()) break;
+
+                  try {
+                    const visual = await verifyCopresence({ imageUrl: img.imageUrl });
+                    if (!visual.isValidScene) {
+                      await emit("image_result", `Collage - ${visual.reason}`, {
+                        imageUrl: img.thumbnailUrl,
+                        status: "collage",
+                        reason: visual.reason,
+                      });
+                      continue;
+                    }
+
+                    validImageIndex++;
+                    state.budgets.rekognitionCallsUsed++;
+                    const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
+
+                    if (isValidEvidence(analysis.celebrities, currentFrontier, candidateName, DEFAULT_CONFIG.confidenceThreshold)) {
+                      const record = createEvidenceRecord(img, analysis, currentFrontier, candidateName);
+                      if (record) {
+                        evidence.push(record);
+                        const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                        await emit("image_result", `[${validImageIndex}] ✓ Evidence - ${currentFrontier} & ${candidateName}`, {
+                          imageIndex: validImageIndex,
+                          imageUrl: img.thumbnailUrl,
+                          status: "evidence",
+                          celebrities: celebs,
+                        });
+                      }
+                    } else {
+                      const celebs = analysis.celebrities.map((c: any) => ({ name: c.name, confidence: Math.round(c.confidence) }));
+                      try {
+                        const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: currentFrontier, personB: candidateName });
+                        if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
+                          const aiRecord: EvidenceRecord = {
+                            from: currentFrontier,
+                            to: candidateName,
+                            imageUrl: img.imageUrl,
+                            thumbnailUrl: img.thumbnailUrl,
+                            contextUrl: img.contextUrl,
+                            title: img.title,
+                            detectedCelebs: [
+                              { name: currentFrontier, confidence: aiVerification.personAConfidence },
+                              { name: candidateName, confidence: aiVerification.personBConfidence },
+                            ],
+                            imageScore: aiVerification.overallConfidence,
+                          };
+                          evidence.push(aiRecord);
+                          await emit("image_result", `[${validImageIndex}] ✓ AI Evidence - ${currentFrontier} & ${candidateName}`, {
+                            imageIndex: validImageIndex,
+                            imageUrl: img.thumbnailUrl,
+                            status: "evidence",
+                            celebrities: [
+                              { name: currentFrontier, confidence: aiVerification.personAConfidence },
+                              { name: candidateName, confidence: aiVerification.personBConfidence },
+                            ],
+                          });
+                        } else {
+                          await emit("image_result", `[${validImageIndex}] No match`, {
+                            imageIndex: validImageIndex,
+                            imageUrl: img.thumbnailUrl,
+                            status: "no_match",
+                            celebrities: celebs,
+                          });
+                        }
+                      } catch (aiError) {
+                        console.warn("[Investigation] AI verification failed:", aiError instanceof Error ? aiError.message : aiError);
+                        await emit("image_result", `[${validImageIndex}] No match`, {
+                          imageIndex: validImageIndex,
+                          imageUrl: img.thumbnailUrl,
+                          status: "no_match",
+                          celebrities: celebs,
+                        });
+                      }
+                    }
+                  } catch (imgError) {
+                    await emit("image_result", `Error - ${imgError instanceof Error ? imgError.message : 'Unknown'}`, {
+                      imageUrl: img.thumbnailUrl,
+                      status: "error",
+                      reason: imgError instanceof Error ? imgError.message : String(imgError),
+                    });
+                    continue;
+                  }
+                }
+              } catch (searchError) {
+                console.warn(`[Investigation] Search failed for query "${q}":`, searchError);
+                continue;
+              }
+
+              if (evidence.length >= 1) break;
+            }
+
+            if (evidence.length > 0) {
+              return createVerifiedEdge(currentFrontier, candidateName, evidence);
+            }
+            return null;
+          });
+
+          if (!edgeToCandidate) {
+            state.failedCandidates.push(candidateName);
+            await completeStep("verify_bridge", false, `Could not verify ${currentFrontier} ↔ ${candidateName}`);
+            continue;
+          }
+
+          // Edge verified! Push to DFS stack and continue from new frontier
+          const frame: DFSStackFrame = {
+            frontier: currentFrontier,
+            candidates: candidatesToTry,
+            candidateIndex: i,
+            edge: edgeToCandidate,
+          };
+          dfsStack.push(frame);
+
+          state.verifiedEdges.push(edgeToCandidate);
+          state.path.push(candidateName);
+          state.hopDepth = dfsStack.length;
+          state.frontier = candidateName;
+          currentFrontier = candidateName;
+
+          await emit("evidence", `Verified: ${frame.frontier} ↔ ${candidateName}`, {
+            edge: {
+              from: frame.frontier,
+              to: candidateName,
+              confidence: edgeToCandidate.edgeConfidence,
+              thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
+              contextUrl: edgeToCandidate.bestEvidence.contextUrl,
+            },
+          });
+
+          try {
+            await upsertEdge(
+              this.env.GRAPH_DB,
+              frame.frontier,
+              candidateName,
+              edgeToCandidate.edgeConfidence,
+              edgeToCandidate.bestEvidence.imageUrl,
+              edgeToCandidate.bestEvidence.thumbnailUrl,
+              edgeToCandidate.bestEvidence.contextUrl
+            );
+            await this.broadcastEdge({
+              source: frame.frontier,
+              target: candidateName,
+              confidence: edgeToCandidate.edgeConfidence,
+              thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
+              contextUrl: edgeToCandidate.bestEvidence.contextUrl,
+            });
+          } catch (error) {
+            // Non-fatal
+            console.warn("[Investigation] Failed to persist bridge edge:", error instanceof Error ? error.message : error);
+          }
+
+          await completeStep("verify_bridge", true, `Connection verified with ${Math.round(edgeToCandidate.edgeConfidence)}% confidence`);
+
+          await emit("path_update", `Path updated: ${state.path.join(" → ")}`, {
+            path: state.path,
+            hopDepth: state.hopDepth,
+          });
+
+          // Now try to connect to target
+          await startStep("connect_target", `Connecting: ${candidateName} ↔ ${personB}`, {
+            fromPerson: candidateName,
+            toPerson: personB,
+          });
+
+          const bridgeEdge = await step.do(`bridge-backtrack-${dfsStack.length}-${candidateName}`, async () => {
+            const queries = bridgeQueries(candidateName, personB);
+            const evidence: EvidenceRecord[] = [];
+            let validImageIndex = 0;
+
+            for (const q of queries) {
+              if (!checkBudget()) break;
+              state.budgets.searchCallsUsed++;
+              try {
+                const searchRes = await searchImages({ query: q });
+                const images = searchRes.results.slice(0, DEFAULT_CONFIG.imagesPerQuery);
+
+                for (const img of images) {
+                  if (!checkBudget()) break;
+                  try {
+                    const visual = await verifyCopresence({ imageUrl: img.imageUrl });
+                    if (!visual.isValidScene) continue;
+
+                    validImageIndex++;
+                    state.budgets.rekognitionCallsUsed++;
+                    const analysis = await detectCelebrities({ imageUrl: img.imageUrl });
+
+                    if (isValidEvidence(analysis.celebrities, candidateName, personB, DEFAULT_CONFIG.confidenceThreshold)) {
+                      const record = createEvidenceRecord(img, analysis, candidateName, personB);
+                      if (record) evidence.push(record);
+                    } else {
+                      try {
+                        const aiVerification = await verifyCelebritiesAI({ imageUrl: img.imageUrl, personA: candidateName, personB });
+                        if (aiVerification.togetherInScene && aiVerification.overallConfidence >= DEFAULT_CONFIG.confidenceThreshold) {
+                          evidence.push({
+                            from: candidateName,
+                            to: personB,
+                            imageUrl: img.imageUrl,
+                            thumbnailUrl: img.thumbnailUrl,
+                            contextUrl: img.contextUrl,
+                            title: img.title,
+                            detectedCelebs: [
+                              { name: candidateName, confidence: aiVerification.personAConfidence },
+                              { name: personB, confidence: aiVerification.personBConfidence },
+                            ],
+                            imageScore: aiVerification.overallConfidence,
+                          });
+                        }
+                      } catch (aiError) {
+                        // AI verification failed - continue
+                        console.warn("[Investigation] AI verification failed for bridge->target:", aiError instanceof Error ? aiError.message : aiError);
+                      }
+                    }
+                  } catch (imgError) {
+                    console.warn("[Investigation] Image processing failed:", imgError instanceof Error ? imgError.message : imgError);
+                    continue;
+                  }
+                }
+              } catch (searchError) {
+                console.warn("[Investigation] Bridge->target search failed:", searchError instanceof Error ? searchError.message : searchError);
+                continue;
+              }
+              if (evidence.length >= 1) break;
+            }
+            if (evidence.length > 0) return createVerifiedEdge(candidateName, personB, evidence);
+            return null;
+          });
+
+          if (bridgeEdge) {
+            // SUCCESS! Found path to target
+            state.verifiedEdges.push(bridgeEdge);
+            state.path.push(personB);
+
+            await emit("evidence", `Verified final hop: ${candidateName} ↔ ${personB}`, {
+              edge: {
+                from: candidateName,
+                to: personB,
+                confidence: bridgeEdge.edgeConfidence,
+                thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
+                contextUrl: bridgeEdge.bestEvidence.contextUrl,
+              },
+            });
+
+            try {
+              await upsertEdge(
+                this.env.GRAPH_DB,
+                candidateName,
+                personB,
+                bridgeEdge.edgeConfidence,
+                bridgeEdge.bestEvidence.imageUrl,
+                bridgeEdge.bestEvidence.thumbnailUrl,
+                bridgeEdge.bestEvidence.contextUrl
+              );
+              await this.broadcastEdge({
+                source: candidateName,
+                target: personB,
+                confidence: bridgeEdge.edgeConfidence,
+                thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
+                contextUrl: bridgeEdge.bestEvidence.contextUrl,
+              });
+            } catch (error) {
+              // Non-fatal
+              console.warn("[Investigation] Failed to persist final bridge edge:", error instanceof Error ? error.message : error);
+            }
+
+            await completeStep("connect_target", true, `Connection to ${personB} verified!`);
+
+            await emit("path_update", `Path complete: ${state.path.join(" → ")}`, {
+              path: state.path,
+              hopDepth: state.hopDepth + 1,
+            });
+
+            const result = this.finalizeSuccess(state);
+            const confidence = calculatePathConfidence(state.verifiedEdges);
+            await emit("final", `Investigation complete! Found ${state.path.length - 1}-hop connection with ${Math.round(confidence.pathBottleneck)}% confidence.`, {
+              result: result.status === "success" ? result.result : undefined,
+            });
+
+            return result;
+          }
+
+          // Could not connect to target - continue DFS from new frontier
+          await completeStep("connect_target", false, `No direct connection to ${personB}. Continuing search...`);
+          await startStep("find_bridges", `Finding bridge candidates from ${candidateName}`, {
+            fromPerson: candidateName,
+          });
+
+          foundValidEdge = true;
+          break;
+        }
+
+        if (!foundValidEdge) {
+          await completeStep("find_bridges", false, "All remaining candidates failed verification");
+          if (!await backtrack()) break;
+          currentFrontier = state.frontier;
+        }
         continue;
       }
 
@@ -832,8 +1238,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
             thumbnailUrl: edgeToCandidate.bestEvidence.thumbnailUrl,
             contextUrl: edgeToCandidate.bestEvidence.contextUrl,
           });
-        } catch {
+        } catch (error) {
           // Failed to persist edge to graph DB - non-fatal
+          console.warn("[Investigation] Failed to persist edge to DB:", error instanceof Error ? error.message : error);
         }
 
         await completeStep("verify_bridge", true, `Connection verified with ${Math.round(edgeToCandidate.edgeConfidence)}% confidence`);
@@ -997,8 +1404,9 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
               thumbnailUrl: bridgeEdge.bestEvidence.thumbnailUrl,
               contextUrl: bridgeEdge.bestEvidence.contextUrl,
             });
-          } catch {
+          } catch (error) {
             // Failed to persist edge to graph DB - non-fatal
+            console.warn("[Investigation] Failed to persist final edge to DB:", error instanceof Error ? error.message : error);
           }
 
           await completeStep("connect_target", true, `Connection to ${personB} verified!`);
@@ -1039,7 +1447,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
     }
 
     const result = this.finalizeFailure(state);
-    await emit("no_path", `Investigation complete. No verified connection found within ${DEFAULT_CONFIG.hopLimit} hops.`, {
+    await emit("no_path", `Investigation complete. No verified connection found within ${DEFAULT_CONFIG.hopLimit} degrees. Try again or search for different people!`, {
       path: state.path,
       hopDepth: state.hopDepth,
     });
@@ -1069,7 +1477,7 @@ export class InvestigationWorkflow extends WorkflowEntrypoint<Env, Params> {
       status: "no_path",
       personA: state.personA,
       personB: state.personB,
-      message: `No verified visual connection found within ${DEFAULT_CONFIG.hopLimit} degrees at ≥${DEFAULT_CONFIG.confidenceThreshold}% confidence.`,
+      message: `No verified visual connection found within ${DEFAULT_CONFIG.hopLimit} degrees at ≥${DEFAULT_CONFIG.confidenceThreshold}% confidence. Try again or search for different people!`,
     };
   }
 }

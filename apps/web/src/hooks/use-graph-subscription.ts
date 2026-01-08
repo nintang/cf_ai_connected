@@ -15,6 +15,7 @@ export interface GraphEdgeUpdate {
   source: string;
   target: string;
   confidence: number;
+  evidenceUrl?: string;
   thumbnailUrl?: string;
   contextUrl?: string;
 }

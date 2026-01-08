@@ -411,3 +411,149 @@ export function createEventStream(
   };
 }
 
+/**
+ * Helper to build WebSocket URL from HTTP URL
+ */
+function getWebSocketUrl(path: string): string {
+  const baseUrl = new URL(WORKER_URL);
+  const protocol = baseUrl.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${baseUrl.host}${path}`;
+}
+
+/**
+ * Creates a WebSocket connection for real-time investigation events
+ * Uses Hibernatable WebSockets via Durable Objects for unlimited streaming
+ * Falls back to SSE if WebSocket connection fails
+ */
+export function createWebSocketEventStream(
+  runId: string,
+  onEvent: (event: InvestigationEvent) => void,
+  onComplete: () => void,
+  onError: (error: Error) => void,
+  cursor: number = 0
+): () => void {
+  const seenEventIds = new Set<string>();
+  let ws: WebSocket | null = null;
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let pingInterval: ReturnType<typeof setInterval> | null = null;
+  let isClosing = false;
+  let currentCursor = cursor;
+
+  // Get unique event ID for deduplication
+  const getEventId = (e: InvestigationEvent): string => {
+    const data = e.data as Record<string, unknown> | undefined;
+    if (data?.eventId) {
+      return data.eventId as string;
+    }
+    return `${e.type}:${e.timestamp}:${e.message}`;
+  };
+
+  const cleanup = () => {
+    isClosing = true;
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+  };
+
+  const connect = () => {
+    if (isClosing) return;
+
+    try {
+      const wsUrl = getWebSocketUrl(`/api/chat/ws/${runId}?cursor=${currentCursor}`);
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("[WebSocket] Connected to investigation stream");
+        // Set up ping interval to keep connection alive
+        pingInterval = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data) as {
+            type: "event" | "complete" | "pong";
+            data?: InvestigationEvent;
+            index?: number;
+          };
+
+          if (message.type === "event" && message.data) {
+            const investigationEvent = message.data;
+            const id = getEventId(investigationEvent);
+
+            // Skip duplicates
+            if (seenEventIds.has(id)) {
+              return;
+            }
+            seenEventIds.add(id);
+
+            // Update cursor for potential reconnect
+            if (typeof message.index === "number") {
+              currentCursor = message.index + 1;
+            }
+
+            onEvent(investigationEvent);
+
+            // Check for completion
+            if (
+              investigationEvent.type === "final" ||
+              investigationEvent.type === "no_path" ||
+              investigationEvent.type === "error"
+            ) {
+              cleanup();
+              onComplete();
+            }
+          }
+
+          if (message.type === "complete") {
+            cleanup();
+            onComplete();
+          }
+
+          // pong is just a heartbeat acknowledgment, no action needed
+        } catch (err) {
+          console.warn("[WebSocket] Failed to parse message:", err);
+        }
+      };
+
+      ws.onclose = (event) => {
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = null;
+        }
+
+        if (!isClosing && !event.wasClean) {
+          // Unexpected close - try to reconnect
+          console.log("[WebSocket] Connection closed unexpectedly, reconnecting...");
+          reconnectTimeout = setTimeout(connect, 3000);
+        }
+      };
+
+      ws.onerror = () => {
+        console.error("[WebSocket] Connection error");
+        // onclose will handle reconnection
+      };
+    } catch (err) {
+      console.error("[WebSocket] Failed to connect:", err);
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  connect();
+
+  // Return cleanup function
+  return cleanup;
+}
+

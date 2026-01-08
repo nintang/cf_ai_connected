@@ -9,10 +9,27 @@ import type {
 } from "@visual-degrees/contracts";
 
 /**
- * Normalize a name for comparison (case-insensitive, trimmed, collapsed spaces)
+ * Common name suffixes to strip for comparison
+ */
+const NAME_SUFFIXES = /\s+(jr\.?|sr\.?|ii+|iii|iv|v|vi|vii|viii|ix|x|phd\.?|md\.?|esq\.?|jd\.?)$/i;
+
+/**
+ * Normalize a name for comparison:
+ * - Trim whitespace
+ * - Collapse multiple spaces
+ * - Convert to lowercase
+ * - Normalize Unicode (remove diacritics like é → e)
+ * - Strip common suffixes (Jr., III, etc.)
  */
 export function normalizeName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
+  return name
+    .trim()
+    .normalize("NFD")                           // Decompose Unicode characters
+    .replace(/[\u0300-\u036f]/g, "")            // Remove diacritical marks
+    .replace(/\s+/g, " ")                       // Collapse whitespace
+    .toLowerCase()
+    .replace(NAME_SUFFIXES, "")                 // Strip suffixes
+    .trim();                                    // Trim again after suffix removal
 }
 
 /**
@@ -87,11 +104,23 @@ export function extractFirstName(name: string): string {
 }
 
 /**
+ * Check if all words in the shorter name appear in the longer name
+ * This is safer than simple substring matching - prevents "Chris" from matching "Chris Evans"
+ */
+function wordsContainedIn(shorter: string, longer: string): boolean {
+  const shorterWords = shorter.split(" ");
+  const longerWords = new Set(longer.split(" "));
+
+  // All words in shorter must appear in longer
+  return shorterWords.every(word => longerWords.has(word));
+}
+
+/**
  * Check if two names match using flexible matching:
  * 1. Exact match (after normalization)
  * 2. Known celebrity aliases (e.g., "Kanye West" vs "Ye")
  * 3. Reversed name order (e.g., "Obama Barack" vs "Barack Obama")
- * 4. One contains the other (e.g., "Donald Trump" contains "Trump")
+ * 4. Word containment (e.g., "Donald Trump" contains all words in "Trump")
  * 5. Surname + first name match (e.g., "Donald Trump" vs "Donald J. Trump")
  */
 export function namesMatch(name1: string, name2: string): boolean {
@@ -111,8 +140,11 @@ export function namesMatch(name1: string, name2: string): boolean {
     if (parts1[0] === parts2[1] && parts1[1] === parts2[0]) return true;
   }
 
-  // One contains the other
-  if (n1.includes(n2) || n2.includes(n1)) return true;
+  // Word containment - all words in shorter name must appear in longer name
+  // This handles "Trump" matching "Donald Trump" but prevents "Chris" matching "Chris Evans"
+  // because "Chris" (1 word) would need to match ALL of ["chris", "evans"] which it doesn't
+  const [shorter, longer] = n1.length < n2.length ? [n1, n2] : [n2, n1];
+  if (wordsContainedIn(shorter, longer)) return true;
 
   // Surname + first name match (handles middle names/initials)
   const surname1 = extractSurname(name1);
@@ -123,7 +155,8 @@ export function namesMatch(name1: string, name2: string): boolean {
   if (surname1 === surname2 && firstName1 === firstName2) return true;
 
   // Surname match only (for cases like just "Trump" or "Obama")
-  if (surname1 === surname2 && (n1.split(" ").length === 1 || n2.split(" ").length === 1)) {
+  // Only if one name is a single word (likely a mononym or surname-only reference)
+  if (surname1 === surname2 && (parts1.length === 1 || parts2.length === 1)) {
     return true;
   }
 

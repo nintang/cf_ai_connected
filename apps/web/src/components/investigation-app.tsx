@@ -316,10 +316,22 @@ function mapWorkerEventsToState(
 
       case "no_path":
         state.status = "failed";
+        // Mark all running segments as failed when no path is found
+        state.segments = state.segments.map(segment =>
+          segment.status === "running"
+            ? { ...segment, status: "failed", endTime: timestamp }
+            : segment
+        );
         break;
 
       case "error":
         state.status = "failed";
+        // Mark all running segments as failed on error
+        state.segments = state.segments.map(segment =>
+          segment.status === "running"
+            ? { ...segment, status: "failed", endTime: timestamp }
+            : segment
+        );
         break;
     }
   }
@@ -708,6 +720,10 @@ export function InvestigationApp() {
                 <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Who is connected to who?</h2>
                 <p className="text-sm sm:text-base text-muted-foreground px-2">
                   Find visual proof of connections between any two people through photos
+                </p>
+                <p className="text-xs text-muted-foreground/70 flex items-center justify-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary/60"></span>
+                  Works best with celebrities & public figures
                 </p>
               </div>
 

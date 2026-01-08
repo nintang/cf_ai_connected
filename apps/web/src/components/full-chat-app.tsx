@@ -441,10 +441,22 @@ function mapWorkerEventsToState(
 
       case "no_path":
         state.status = "failed";
+        // Mark all running segments as failed when no path is found
+        state.segments = state.segments.map(segment =>
+          segment.status === "running"
+            ? { ...segment, status: "failed", endTime: timestamp }
+            : segment
+        );
         break;
 
       case "error":
         state.status = "failed";
+        // Mark all running segments as failed on error
+        state.segments = state.segments.map(segment =>
+          segment.status === "running"
+            ? { ...segment, status: "failed", endTime: timestamp }
+            : segment
+        );
         break;
     }
   }

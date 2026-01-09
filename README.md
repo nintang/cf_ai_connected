@@ -206,7 +206,7 @@ graph TB
 - API keys for:
   - Google Programmable Search Engine
   - AWS Rekognition
-  - OpenRouter (for Gemini access)
+  - OpenRouter (for Gemini with web search access)
 
 ### Installation
 

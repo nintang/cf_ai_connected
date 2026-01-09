@@ -107,6 +107,43 @@ graph TD
 | **Visual Filter** | Gemini Flash | Collage/montage detection |
 | **Planning** | Gemini 2.0 Flash | Strategic candidate ranking |
 
+## Built on Cloudflare
+
+This project leverages the full Cloudflare developer platform for a serverless, globally distributed architecture:
+
+| Service | Usage | Why It Matters |
+|---------|-------|----------------|
+| **[Workers](https://workers.cloudflare.com/)** | API orchestration & business logic | Sub-50ms cold starts, runs at the edge closest to users |
+| **[Workflows](https://developers.cloudflare.com/workflows/)** | Investigation state machine | Durable execution with automatic retries, perfect for multi-step AI pipelines |
+| **[Durable Objects](https://developers.cloudflare.com/durable-objects/)** | Real-time WebSocket streaming | Per-investigation isolation, consistent state for live event broadcasting |
+| **[KV](https://developers.cloudflare.com/kv/)** | Session state & rate limiting | Global, low-latency key-value storage with TTL support |
+| **[Pages](https://pages.cloudflare.com/)** | Next.js frontend hosting | Git-integrated deployment with edge rendering |
+
+```mermaid
+graph LR
+    subgraph Cloudflare Edge
+        Pages["Pages<br/>Next.js Frontend"]
+        Workers["Workers<br/>API & Orchestration"]
+        Workflows["Workflows<br/>State Machine"]
+        DO["Durable Objects<br/>WebSocket Hub"]
+        KV["KV<br/>Session Store"]
+    end
+
+    User --> Pages
+    Pages --> Workers
+    Workers --> Workflows
+    Workflows --> DO
+    Workflows --> KV
+    DO -->|Real-time events| Pages
+```
+
+### Why Cloudflare?
+
+- **Zero infrastructure management** - No servers to provision or scale
+- **Global by default** - Code runs in 300+ locations worldwide
+- **Cost efficient** - Pay only for what you use, generous free tier
+- **Integrated ecosystem** - Workers, KV, Durable Objects, and Workflows work seamlessly together
+
 ## Project Structure
 
 ```

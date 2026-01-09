@@ -1,4 +1,4 @@
-# Visual Degrees
+# Connected?
 
 A chat-first investigation system that finds **visual degrees of separation** between public figures using live image search, celebrity face verification, and AI-guided reasoning.
 

@@ -8,6 +8,8 @@ dist/
 # Environment
 .env
 .env.local
+.dev.vars
+*.vars
 
 # IDE
 .idea/

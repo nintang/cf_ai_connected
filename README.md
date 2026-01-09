@@ -14,15 +14,9 @@ Every connection is backed by **visual evidence** - no hallucinated relationship
 
 ## Demo
 
-```
-You: How is Elon Musk connected to Beyonce?
+[![Watch the demo](https://img.youtube.com/vi/ClhDXklbhmo/maxresdefault.jpg)](https://www.youtube.com/watch?v=ClhDXklbhmo)
 
-System: Searching for direct connection...
-        Found: Elon Musk → Jay-Z (Met Gala 2022, 94% confidence)
-        Verifying: Jay-Z → Beyonce (Grammy Awards, 99% confidence)
-
-        Path found in 2 hops with 94% confidence!
-```
+> Click the image above to watch the demo on YouTube
 
 ## Architecture Overview
 

@@ -147,7 +147,7 @@ graph LR
 ## Project Structure
 
 ```
-who-is-connected-to-who/
+cf_ai_connected/
 ├── apps/
 │   ├── web/                    # Next.js chat UI
 │   │   ├── src/
@@ -212,8 +212,8 @@ graph TB
 
 ```bash
 # Clone the repository
-git clone https://github.com/nintang/who-is-connected-to-who.git
-cd who-is-connected-to-who
+git clone https://github.com/nintang/cf_ai_connected.git
+cd cf_ai_connected
 
 # Install dependencies
 pnpm install
